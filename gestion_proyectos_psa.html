@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Gestión de Proyectos e Implementación — URSA I del Este / PSA</title>
+<style>
+  :root{
+    --navy:#0b1f3a; --navy2:#132a4f; --gold:#c9a227; --gold-d:#a8871f;
+    --bg:#f4f6f9; --border:#d8dce3; --text:#1c2536; --muted:#5a6478;
+    --danger:#b23b3b; --green:#2c6e49; --amber:#b8860b; --red:#a53232;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);}
+  header{background:linear-gradient(135deg,var(--navy),var(--navy2));color:#fff;padding:18px 28px;
+    display:flex;align-items:center;justify-content:space-between;border-bottom:4px solid var(--gold);}
+  header h1{margin:0;font-size:19px;letter-spacing:.4px;}
+  header p{margin:2px 0 0;font-size:12px;color:#c9d3e6;}
+  .badge{background:var(--gold);color:var(--navy);font-weight:700;font-size:11px;padding:4px 10px;border-radius:3px;letter-spacing:.5px;}
+  nav.tabs{display:flex;gap:6px;background:#fff;border-bottom:1px solid var(--border);padding:0 18px;max-width:1180px;margin:0 auto;}
+  nav.tabs button{background:none;border:none;padding:14px 18px;font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;}
+  nav.tabs button.active{color:var(--navy);border-bottom-color:var(--gold);}
+  main{max-width:1180px;margin:22px auto;padding:0 18px;}
+  section.view{display:none;}
+  section.view.active{display:block;}
+  .card{background:#fff;border:1px solid var(--border);border-radius:8px;padding:20px 22px;margin-bottom:20px;box-shadow:0 1px 3px rgba(11,31,58,.06);}
+  .card h2{margin:0 0 14px;font-size:15px;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--gold);padding-bottom:8px;}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .grid label{display:flex;flex-direction:column;font-size:12.5px;color:var(--muted);gap:4px;font-weight:600;}
+  input,select,textarea{font-family:inherit;font-size:13.5px;padding:8px 10px;border:1px solid var(--border);border-radius:5px;color:var(--text);background:#fbfcfe;}
+  textarea{resize:vertical;min-height:54px;}
+  .full{grid-column:1/-1;}
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  button.btn{cursor:pointer;border:none;border-radius:5px;padding:10px 18px;font-size:13px;font-weight:700;letter-spacing:.3px;}
+  .btn-primary{background:var(--navy);color:#fff;}
+  .btn-primary:hover{background:var(--navy2);}
+  .btn-gold{background:var(--gold);color:var(--navy);}
+  .btn-gold:hover{background:var(--gold-d);}
+  .btn-ghost{background:#fff;color:var(--navy);border:1px solid var(--navy);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid var(--danger);}
+  .btn-danger:hover{background:var(--danger);color:#fff;}
+  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;}
+  .filters label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:4px;font-weight:600;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;}
+  th{background:var(--navy);color:#fff;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;}
+  tr:hover td{background:#f7f9fc;}
+  .tag{display:inline-block;padding:3px 8px;border-radius:10px;font-size:10.5px;font-weight:700;color:#fff;}
+  .est-curso{background:#3465a4;} .est-completado{background:var(--green);} .est-demorado{background:var(--amber);} .est-suspendido{background:var(--red);}
+  .cum-termino{background:var(--green);} .cum-demora{background:var(--amber);} .cum-parcial{background:#a06b1a;} .cum-no{background:var(--red);} .cum-curso{background:#6b7280;}
+  .imp-no{background:#6b7280;} .imp-piloto{background:#7b4fa6;} .imp-parcial{background:#3465a4;} .imp-completa{background:var(--green);} .imp-produccion{background:#1f7a8c;} .imp-discontinuado{background:var(--red);}
+  .row-actions button{padding:4px 8px;font-size:11px;margin-right:4px;}
+  .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+  .stat{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;text-align:center;}
+  .stat .num{font-size:24px;font-weight:800;color:var(--navy);}
+  .stat .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;}
+  .bar-bg{background:var(--border);border-radius:6px;height:10px;width:100%;overflow:hidden;}
+  .bar-fill{background:var(--gold-d);height:100%;}
+  .empty{text-align:center;color:var(--muted);padding:30px;font-size:13px;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--navy);color:#fff;padding:12px 18px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.2);opacity:0;transform:translateY(10px);transition:.25s;pointer-events:none;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  @media print{
+    header .badge, .actions, .filters, .row-actions, nav.tabs, .no-print{display:none!important;}
+    section.view{display:block!important;}
+    body{background:#fff;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Gestión de Proyectos e Implementación</h1>
+    <p>URSA I del Este — Policía de Seguridad Aeroportuaria</p>
+  </div>
+  <div class="badge">PSA · AVSEC</div>
+</header>
+
+<nav class="tabs">
+  <button class="active" data-view="v-dashboard" onclick="cambiarTab('v-dashboard', this)">Panel general</button>
+  <button data-view="v-proyectos" onclick="cambiarTab('v-proyectos', this)">Proyectos</button>
+</nav>
+
+<main>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section id="v-dashboard" class="view active">
+    <div class="card">
+      <h2>Estado general de proyectos</h2>
+      <div class="summary-grid" id="dash-estado"></div>
+      <div id="dash-barras"></div>
+    </div>
+    <div class="card">
+      <h2>Nivel de implementación</h2>
+      <div class="summary-grid" id="dash-implementacion"></div>
+    </div>
+  </section>
+
+  <!-- ============ PROYECTOS ============ -->
+  <section id="v-proyectos" class="view">
+    <div class="card">
+      <h2>Nuevo proyecto</h2>
+      <div class="grid">
+        <label>Nombre del proyecto<input type="text" id="p-nombre" placeholder="Ej: Sistema de evaluación de desempeño"></label>
+        <label>Responsable<input type="text" id="p-responsable" placeholder="Ej: Com. My. Diego ..."></label>
+        <label>División / Área<input type="text" id="p-division" placeholder="Ej: URSA I del Este"></label>
+        <label>Fecha de inicio<input type="date" id="p-inicio"></label>
+        <label>Fecha objetivo (meta)<input type="date" id="p-meta"></label>
+        <label>Fecha de finalización real<input type="date" id="p-fin"></label>
+        <label>Estado
+          <select id="p-estado"><option>En curso</option><option>Completado</option><option>Demorado</option><option>Suspendido</option></select>
+        </label>
+        <label>% de avance<input type="number" id="p-avance" min="0" max="100" step="5" value="0"></label>
+        <label>Nivel de implementación
+          <select id="p-implementacion">
+            <option>No iniciado</option>
+            <option>Piloto / Prueba</option>
+            <option>Implementación parcial</option>
+            <option>Implementación completa</option>
+            <option>En producción / uso regular</option>
+            <option>Discontinuado</option>
+          </select>
+        </label>
+        <label>Cumplimiento
+          <select id="p-cumplimiento">
+            <option>En curso (pendiente de evaluar)</option>
+            <option>Cumplido en término</option>
+            <option>Cumplido con demora</option>
+            <option>Parcialmente cumplido</option>
+            <option>No cumplido</option>
+          </select>
+        </label>
+        <label class="full">Objetivo / meta medible<textarea id="p-objetivo" placeholder="Ej: Reducir tiempo de cola de PIR en un 20% antes de fin de año."></textarea></label>
+        <label class="full">Resultado obtenido<textarea id="p-resultado" placeholder="Indicadores reales alcanzados, con cifras si es posible."></textarea></label>
+        <label class="full">Observaciones<textarea id="p-observaciones" placeholder="Opcional"></textarea></label>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="guardarProyecto()">Guardar proyecto</button>
+        <button class="btn btn-ghost" onclick="limpiarFormProyecto()">Limpiar</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Listado de proyectos</h2>
+      <div class="filters no-print">
+        <label>Buscar<input type="text" id="filtro-p-texto" oninput="renderTablaProyectos()" placeholder="Nombre o responsable..."></label>
+        <label>Estado
+          <select id="filtro-p-estado" onchange="renderTablaProyectos()">
+            <option value="">Todos</option><option>En curso</option><option>Completado</option><option>Demorado</option><option>Suspendido</option>
+          </select>
+        </label>
+        <label>Implementación
+          <select id="filtro-p-implementacion" onchange="renderTablaProyectos()">
+            <option value="">Todas</option>
+            <option>No iniciado</option><option>Piloto / Prueba</option><option>Implementación parcial</option>
+            <option>Implementación completa</option><option>En producción / uso regular</option><option>Discontinuado</option>
+          </select>
+        </label>
+        <button class="btn btn-ghost" onclick="limpiarFiltrosProyectos()">Limpiar filtros</button>
+        <button class="btn btn-gold" onclick="exportarCSVProyectos()">Exportar CSV</button>
+        <button class="btn btn-ghost" onclick="window.print()">Imprimir</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Proyecto</th><th>Responsable</th><th>Inicio</th><th>Meta</th><th>Fin real</th>
+            <th>Estado</th><th>Avance</th><th>Implementación</th><th>Cumplimiento</th><th>Objetivo</th><th>Resultado</th><th></th></tr></thead>
+          <tbody id="tabla-proyectos-body"></tbody>
+        </table>
+        <div id="tabla-proyectos-empty" class="empty" style="display:none;">Aún no hay proyectos cargados.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let proyectos = [];
+let editandoProyectoId = null;
+
+const tagClassEstado = {"En curso":"est-curso","Completado":"est-completado","Demorado":"est-demorado","Suspendido":"est-suspendido"};
+const tagClassCumpl = {
+  "Cumplido en término":"cum-termino","Cumplido con demora":"cum-demora","Parcialmente cumplido":"cum-parcial",
+  "No cumplido":"cum-no","En curso (pendiente de evaluar)":"cum-curso"
+};
+const tagClassImpl = {
+  "No iniciado":"imp-no","Piloto / Prueba":"imp-piloto","Implementación parcial":"imp-parcial",
+  "Implementación completa":"imp-completa","En producción / uso regular":"imp-produccion","Discontinuado":"imp-discontinuado"
+};
+const implementacionOrden = ["No iniciado","Piloto / Prueba","Implementación parcial","Implementación completa","En producción / uso regular","Discontinuado"];
+
+function cambiarTab(viewId, btn){
+  document.querySelectorAll('section.view').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(viewId).classList.add('active');
+  btn.classList.add('active');
+}
+
+async function cargarDatos(){
+  try{
+    const p = await window.storage.get('proyectos', false);
+    proyectos = p ? JSON.parse(p.value) : [];
+  }catch(e){ proyectos = []; }
+  renderTodo();
+}
+async function persistirProyectos(){
+  try{ await window.storage.set('proyectos', JSON.stringify(proyectos), false); }
+  catch(e){ mostrarToast('Error al guardar proyectos.'); }
+}
+function mostrarToast(msg){
+  const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function escapeHtml(s){
+  if(s===undefined||s===null) return '';
+  return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+}
+function formatFecha(f){
+  if(!f) return '—';
+  const [y,m,d] = f.split('-'); return `${d}/${m}/${y}`;
+}
+
+/* ---------- PROYECTOS ---------- */
+function limpiarFormProyecto(){
+  ['p-nombre','p-responsable','p-division','p-inicio','p-meta','p-fin','p-objetivo','p-resultado','p-observaciones']
+    .forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-estado').selectedIndex = 0;
+  document.getElementById('p-implementacion').selectedIndex = 0;
+  document.getElementById('p-cumplimiento').selectedIndex = 0;
+  document.getElementById('p-avance').value = 0;
+  editandoProyectoId = null;
+}
+async function guardarProyecto(){
+  const nombre = document.getElementById('p-nombre').value.trim();
+  const responsable = document.getElementById('p-responsable').value.trim();
+  const inicio = document.getElementById('p-inicio').value;
+  if(!nombre || !responsable || !inicio){ mostrarToast('Complete nombre, responsable y fecha de inicio.'); return; }
+
+  let avance = parseInt(document.getElementById('p-avance').value, 10);
+  if(isNaN(avance)) avance = 0;
+  avance = Math.max(0, Math.min(100, avance));
+
+  const proyecto = {
+    id: editandoProyectoId || (Date.now().toString(36)+Math.random().toString(36).slice(2,7)),
+    nombre, responsable,
+    division: document.getElementById('p-division').value.trim(),
+    inicio,
+    meta: document.getElementById('p-meta').value,
+    fin: document.getElementById('p-fin').value,
+    estado: document.getElementById('p-estado').value,
+    avance,
+    implementacion: document.getElementById('p-implementacion').value,
+    cumplimiento: document.getElementById('p-cumplimiento').value,
+    objetivo: document.getElementById('p-objetivo').value.trim(),
+    resultado: document.getElementById('p-resultado').value.trim(),
+    observaciones: document.getElementById('p-observaciones').value.trim()
+  };
+  if(editandoProyectoId){
+    const idx = proyectos.findIndex(p=>p.id===editandoProyectoId);
+    if(idx>-1) proyectos[idx] = proyecto;
+  }else{ proyectos.push(proyecto); }
+  await persistirProyectos();
+  limpiarFormProyecto();
+  renderTodo();
+  mostrarToast('Proyecto guardado correctamente.');
+}
+function editarProyecto(id){
+  const p = proyectos.find(x=>x.id===id); if(!p) return;
+  document.getElementById('p-nombre').value = p.nombre;
+  document.getElementById('p-responsable').value = p.responsable;
+  document.getElementById('p-division').value = p.division;
+  document.getElementById('p-inicio').value = p.inicio;
+  document.getElementById('p-meta').value = p.meta;
+  document.getElementById('p-fin').value = p.fin;
+  document.getElementById('p-estado').value = p.estado;
+  document.getElementById('p-avance').value = p.avance;
+  document.getElementById('p-implementacion').value = p.implementacion || 'No iniciado';
+  document.getElementById('p-cumplimiento').value = p.cumplimiento;
+  document.getElementById('p-objetivo').value = p.objetivo;
+  document.getElementById('p-resultado').value = p.resultado;
+  document.getElementById('p-observaciones').value = p.observaciones;
+  editandoProyectoId = id;
+  cambiarTab('v-proyectos', document.querySelector('nav.tabs button[data-view="v-proyectos"]'));
+  window.scrollTo({top:0, behavior:'smooth'});
+  mostrarToast('Editando proyecto. Guarde para confirmar los cambios.');
+}
+async function eliminarProyecto(id){
+  if(!confirm('¿Eliminar este proyecto?')) return;
+  proyectos = proyectos.filter(p=>p.id!==id);
+  await persistirProyectos();
+  renderTodo();
+  mostrarToast('Proyecto eliminado.');
+}
+function limpiarFiltrosProyectos(){
+  document.getElementById('filtro-p-texto').value='';
+  document.getElementById('filtro-p-estado').value='';
+  document.getElementById('filtro-p-implementacion').value='';
+  renderTablaProyectos();
+}
+function filtrarProyectos(){
+  const texto = document.getElementById('filtro-p-texto').value.toLowerCase();
+  const estado = document.getElementById('filtro-p-estado').value;
+  const impl = document.getElementById('filtro-p-implementacion').value;
+  return proyectos.filter(p=>{
+    if(texto && !(p.nombre.toLowerCase().includes(texto) || p.responsable.toLowerCase().includes(texto))) return false;
+    if(estado && p.estado !== estado) return false;
+    if(impl && p.implementacion !== impl) return false;
+    return true;
+  }).sort((a,b)=> (b.inicio||'').localeCompare(a.inicio||''));
+}
+function renderTablaProyectos(){
+  const datos = filtrarProyectos();
+  const body = document.getElementById('tabla-proyectos-body');
+  const empty = document.getElementById('tabla-proyectos-empty');
+  body.innerHTML='';
+  if(datos.length===0){ empty.style.display='block'; return; }
+  empty.style.display='none';
+  datos.forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${escapeHtml(p.nombre)}</strong><br><span style="color:#5a6478;font-size:11px;">${escapeHtml(p.division)}</span></td>
+      <td>${escapeHtml(p.responsable)}</td>
+      <td>${formatFecha(p.inicio)}</td><td>${formatFecha(p.meta)}</td><td>${formatFecha(p.fin)}</td>
+      <td><span class="tag ${tagClassEstado[p.estado]||''}">${escapeHtml(p.estado)}</span></td>
+      <td style="min-width:90px;">
+        <div class="bar-bg"><div class="bar-fill" style="width:${p.avance}%;"></div></div>
+        <div style="font-size:11px;margin-top:2px;">${p.avance}%</div>
+      </td>
+      <td><span class="tag ${tagClassImpl[p.implementacion]||'imp-no'}">${escapeHtml(p.implementacion||'No iniciado')}</span></td>
+      <td><span class="tag ${tagClassCumpl[p.cumplimiento]||''}">${escapeHtml(p.cumplimiento)}</span></td>
+      <td>${escapeHtml(p.objetivo)}</td>
+      <td>${escapeHtml(p.resultado)}</td>
+      <td class="row-actions no-print">
+        <button class="btn btn-ghost" onclick="editarProyecto('${p.id}')">Editar</button>
+        <button class="btn btn-danger" onclick="eliminarProyecto('${p.id}')">Eliminar</button>
+      </td>`;
+    body.appendChild(tr);
+  });
+}
+function exportarCSVProyectos(){
+  const datos = filtrarProyectos();
+  if(datos.length===0){ mostrarToast('No hay datos para exportar.'); return; }
+  const headers = ['Proyecto','Responsable','División','Inicio','Meta','Fin real','Estado','Avance %','Nivel de implementación','Cumplimiento','Objetivo','Resultado','Observaciones'];
+  const filas = datos.map(p=>[p.nombre,p.responsable,p.division,formatFecha(p.inicio),formatFecha(p.meta),formatFecha(p.fin),p.estado,p.avance,p.implementacion,p.cumplimiento,p.objetivo,p.resultado,p.observaciones]
+    .map(v=>`"${String(v||'').replaceAll('"','""')}"`).join(','));
+  descargarCSV([headers.join(','),...filas].join('\n'), 'proyectos_ursa1este.csv');
+}
+function descargarCSV(csv, filename){
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------- DASHBOARD ---------- */
+function renderDashboard(){
+  const totalP = proyectos.length;
+  const enCurso = proyectos.filter(p=>p.estado==='En curso').length;
+  const completados = proyectos.filter(p=>p.estado==='Completado').length;
+  const demorados = proyectos.filter(p=>p.estado==='Demorado').length;
+  const cumplidosTermino = proyectos.filter(p=>p.cumplimiento==='Cumplido en término').length;
+  const evaluables = proyectos.filter(p=>p.cumplimiento!=='En curso (pendiente de evaluar)').length;
+  const pctCumplTermino = evaluables>0 ? Math.round((cumplidosTermino/evaluables)*100) : 0;
+  const avgAvance = totalP>0 ? Math.round(proyectos.reduce((s,p)=>s+(p.avance||0),0)/totalP) : 0;
+
+  document.getElementById('dash-estado').innerHTML = `
+    <div class="stat"><div class="num">${totalP}</div><div class="lbl">Proyectos totales</div></div>
+    <div class="stat"><div class="num">${enCurso}</div><div class="lbl">En curso</div></div>
+    <div class="stat"><div class="num">${completados}</div><div class="lbl">Completados</div></div>
+    <div class="stat"><div class="num">${demorados}</div><div class="lbl">Demorados</div></div>
+  `;
+
+  document.getElementById('dash-barras').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px;">
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">% de proyectos cumplidos en término (sobre evaluables)</div>
+        <div class="bar-bg" style="height:16px;"><div class="bar-fill" style="width:${pctCumplTermino}%;"></div></div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-top:4px;">${pctCumplTermino}%</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">Avance promedio de todos los proyectos</div>
+        <div class="bar-bg" style="height:16px;"><div class="bar-fill" style="width:${avgAvance}%;"></div></div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-top:4px;">${avgAvance}%</div>
+      </div>
+    </div>
+  `;
+
+  const porImpl = {};
+  implementacionOrden.forEach(k=>porImpl[k]=0);
+  proyectos.forEach(p=>{ const k=p.implementacion||'No iniciado'; porImpl[k]=(porImpl[k]||0)+1; });
+  const enProduccion = porImpl["En producción / uso regular"] || 0;
+
+  document.getElementById('dash-implementacion').innerHTML = implementacionOrden.map(k=>`
+    <div class="stat"><div class="num">${porImpl[k]}</div><div class="lbl">${k}</div></div>
+  `).join('') + '';
+}
+
+function renderTodo(){
+  renderTablaProyectos();
+  renderDashboard();
+}
+
+cargarDatos();
+</script>
+
+</body>
+</html>

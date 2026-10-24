@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de gestión de proyectos e implementación — URSA I del Este, Policía de Seguridad Aeroportuaria">
+  <title>Gestión de Proyectos — URSA I del Este / PSA</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     CABECERA
+     ══════════════════════════════════════════ -->
+<header>
+  <div>
+    <h1>Gestión de Proyectos e Implementación</h1>
+    <p>URSA I del Este — Policía de Seguridad Aeroportuaria</p>
+    <div class="header-db no-print">
+      <span id="db-status" aria-live="polite"></span>
+      <button id="btn-db-connect" class="btn btn-sm hidden"
+              onclick="PSA.gestionarConexionDB()">Seleccionar carpeta de base de datos</button>
+      <span id="db-detail" aria-live="polite"></span>
+    </div>
+  </div>
+  <div class="badge">PSA · AVSEC</div>
+</header>
+
+<!-- ══════════════════════════════════════════
+     NAVEGACIÓN POR PESTAÑAS
+     ══════════════════════════════════════════ -->
+<nav class="tabs" role="tablist">
+  <button class="active" role="tab" aria-selected="true"
+          data-view="v-dashboard"
+          onclick="PSA.cambiarTab('v-dashboard', this)">Panel general</button>
+  <button role="tab" aria-selected="false"
+          data-view="v-proyectos"
+          onclick="PSA.cambiarTab('v-proyectos', this)">Proyectos</button>
+</nav>
+
+<!-- ══════════════════════════════════════════
+     OVERLAY DE CARGA
+     ══════════════════════════════════════════ -->
+<div id="loading-overlay" class="loading-overlay">
+  Iniciando…
+</div>
+
+<!-- ════════════════════════════════════════════
+     OVERLAY DE CONEXIÓN OBLIGATORIA
+     Bloquea la UI hasta que db/vertex.db esté conectada.
+     ════════════════════════════════════════════ -->
+<div id="connect-overlay" class="connect-overlay hidden">
+  <div class="connect-box">
+    <div class="connect-icon">🗄</div>
+    <h2 id="connect-title">Base de datos requerida</h2>
+    <p id="connect-msg">Seleccione la carpeta que contiene <strong>vertex.db</strong>.</p>
+    <button id="connect-btn" class="btn btn-primary"
+            onclick="PSA.gestionarConexionDB()">Seleccionar carpeta</button>
+    <button id="connect-folder-btn" class="btn btn-ghost hidden"
+            onclick="PSA.gestionarConexionDB(true)">Seleccionar otra carpeta</button>
+    <p class="connect-hint">
+      Puede elegir <code>db/</code> del proyecto o cualquier carpeta autorizada.
+      Se usará <code>vertex.db</code>; si no existe, se pedirá confirmar su creación.
+      El navegador recuerda el acceso, pero no expone la ruta absoluta.
+    </p>
+  </div>
+</div>
+
+<main>
+
+  <!-- ══════════════════════════════════════
+       PANEL GENERAL (DASHBOARD)
+       ══════════════════════════════════════ -->
+  <section id="v-dashboard" class="view active" role="tabpanel">
+
+    <div class="card">
+      <h2>Estado general de proyectos</h2>
+      <div class="summary-grid" id="dash-estado"></div>
+      <div id="dash-barras"></div>
+    </div>
+
+    <div class="card">
+      <h2>Cumplimiento</h2>
+      <div class="summary-grid grid-5col" id="dash-cumplimiento"></div>
+    </div>
+
+    <div class="card">
+      <h2>Nivel de implementación</h2>
+      <div class="summary-grid grid-3col" id="dash-implementacion"></div>
+    </div>
+
+    <!-- Alerta de proyectos suspendidos -->
+    <div class="card card-danger hidden" id="dash-suspendidos">
+      <h2 class="danger">Proyectos suspendidos</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Proyecto</th>
+              <th>Responsable</th>
+              <th>Observaciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ══════════════════════════════════════
+       PROYECTOS
+       ══════════════════════════════════════ -->
+  <section id="v-proyectos" class="view" role="tabpanel">
+
+    <!-- Formulario -->
+    <div class="card">
+      <h2>Nuevo proyecto</h2>
+
+      <!-- Indicador de edición activa -->
+      <div id="edit-indicator" class="edit-indicator" role="alert">
+        ✏ Modo edición activo — modifique los campos y presione «Guardar proyecto».
+        Presione <kbd>Esc</kbd> para cancelar.
+      </div>
+
+      <div class="grid">
+        <label>
+          Nombre del proyecto
+          <input type="text" id="p-nombre" maxlength="200"
+                 placeholder="Ej: Sistema de evaluación de desempeño"
+                 autocomplete="off">
+        </label>
+        <label>
+          Responsable
+          <input type="text" id="p-responsable" maxlength="120"
+                 placeholder="Ej: Com. My. Diego …"
+                 autocomplete="off">
+        </label>
+        <label>
+          División / Área
+          <input type="text" id="p-division" maxlength="100"
+                 placeholder="Ej: URSA I del Este">
+        </label>
+
+        <label>
+          Fecha de inicio
+          <input type="date" id="p-inicio">
+        </label>
+        <label>
+          Fecha objetivo (meta)
+          <input type="date" id="p-meta">
+        </label>
+        <label>
+          Fecha de finalización real
+          <input type="date" id="p-fin">
+        </label>
+
+        <label>
+          Estado
+          <select id="p-estado">
+            <option>En curso</option>
+            <option>Completado</option>
+            <option>Demorado</option>
+            <option>Suspendido</option>
+          </select>
+        </label>
+        <label>
+          % de avance
+          <input type="number" id="p-avance" min="0" max="100" step="5" value="0">
+        </label>
+        <label>
+          Nivel de implementación
+          <select id="p-implementacion">
+            <option>No iniciado</option>
+            <option>Piloto / Prueba</option>
+            <option>Implementación parcial</option>
+            <option>Implementación completa</option>
+            <option>En producción / uso regular</option>
+            <option>Discontinuado</option>
+          </select>
+        </label>
+
+        <label>
+          Cumplimiento
+          <select id="p-cumplimiento">
+            <option>En curso (pendiente de evaluar)</option>
+            <option>Cumplido en término</option>
+            <option>Cumplido con demora</option>
+            <option>Parcialmente cumplido</option>
+            <option>No cumplido</option>
+          </select>
+        </label>
+
+        <label class="full">
+          Objetivo / meta medible
+          <textarea id="p-objetivo" rows="2"
+                    placeholder="Ej: Reducir tiempo de cola de PIR en un 20% antes de fin de año."></textarea>
+        </label>
+        <label class="full">
+          Resultado obtenido
+          <textarea id="p-resultado" rows="2"
+                    placeholder="Indicadores reales alcanzados, con cifras si es posible."></textarea>
+        </label>
+        <label class="full">
+          Observaciones
+          <textarea id="p-observaciones" rows="2"
+                    placeholder="Opcional — contexto adicional o impedimentos."></textarea>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary"
+                onclick="PSA.Proyectos.guardarProyecto()">Guardar proyecto</button>
+        <button class="btn btn-ghost"
+                onclick="PSA.Proyectos.limpiarForm()">Limpiar / Cancelar</button>
+      </div>
+    </div>
+
+    <!-- Listado -->
+    <div class="card">
+      <h2>Listado de proyectos</h2>
+
+      <div class="filters no-print">
+        <label>
+          Buscar
+          <input type="search" id="filtro-p-texto"
+                 oninput="PSA.Proyectos.renderTabla()"
+                 placeholder="Nombre, responsable o división…">
+        </label>
+        <label>
+          Estado
+          <select id="filtro-p-estado" onchange="PSA.Proyectos.renderTabla()">
+            <option value="">Todos</option>
+            <option>En curso</option>
+            <option>Completado</option>
+            <option>Demorado</option>
+            <option>Suspendido</option>
+          </select>
+        </label>
+        <label>
+          Implementación
+          <select id="filtro-p-implementacion" onchange="PSA.Proyectos.renderTabla()">
+            <option value="">Todas</option>
+            <option>No iniciado</option>
+            <option>Piloto / Prueba</option>
+            <option>Implementación parcial</option>
+            <option>Implementación completa</option>
+            <option>En producción / uso regular</option>
+            <option>Discontinuado</option>
+          </select>
+        </label>
+        <button class="btn btn-ghost"
+                onclick="PSA.Proyectos.limpiarFiltros()">Limpiar filtros</button>
+        <button class="btn btn-gold"
+                onclick="PSA.Proyectos.exportarCSV()">Exportar CSV</button>
+        <button class="btn btn-ghost"
+                onclick="PSA.Proyectos.exportarDB()"
+                title="Exportar la base de datos SQLite completa (.db)">Exportar DB</button>
+        <button class="btn btn-ghost"
+                onclick="window.print()">Imprimir</button>
+      </div>
+
+      <div class="tabla-count" id="tabla-count"></div>
+
+      <div class="table-wrap">
+        <table aria-label="Listado de proyectos">
+          <thead>
+            <tr>
+              <th>Proyecto</th>
+              <th>Responsable</th>
+              <th>Inicio</th>
+              <th>Meta</th>
+              <th>Fin real</th>
+              <th>Estado</th>
+              <th>Avance</th>
+              <th>Implementación</th>
+              <th>Cumplimiento</th>
+              <th>Objetivo</th>
+              <th>Resultado</th>
+              <th class="no-print"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-proyectos-body"></tbody>
+        </table>
+        <div id="tabla-proyectos-empty" class="empty hidden" aria-live="polite">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 17H7A5 5 0 0 1 7 7h2m6 0h2a5 5 0 0 1 0 10h-2M8 12h8"/>
+          </svg>
+          Aún no hay proyectos cargados o no coinciden con los filtros aplicados.
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- Notificación tipo toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- ══════════════════════════════════════════
+     SCRIPTS  (orden importante)
+     1. sql.js desde CDN
+     2. Capa de base de datos
+     3. Módulos de funcionalidad
+     4. Inicialización principal
+     ══════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+<script src="js/db.js"></script>
+<script src="js/proyectos.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
