@@ -107,9 +107,14 @@
     return {};
   }
 
-  function _evento(tx, contexto, tipo, detalle) {
-    tx.run('INSERT INTO actividad (proyecto_id,tablero_id,tarjeta_id,tipo,detalle) VALUES (?,?,?,?,?)',
-      [contexto.proyecto_id || null, contexto.tablero_id || null, contexto.tarjeta_id || null, tipo, detalle]);
+  function _evento(tx, contexto, tipo, detalle, tarjetaTitulo = '') {
+    const tarjetaId = contexto.tarjeta_id || null;
+    const titulo = tarjetaTitulo || (tarjetaId
+      ? (tx.all('SELECT titulo FROM tarjetas WHERE id=?', [tarjetaId])[0] || {}).titulo || ''
+      : '');
+    tx.run(`INSERT INTO actividad
+      (proyecto_id,tablero_id,tarjeta_id,tarjeta_titulo,tipo,detalle) VALUES (?,?,?,?,?,?)`,
+    [contexto.proyecto_id || null, contexto.tablero_id || null, tarjetaId, titulo, tipo, detalle]);
   }
 
   function _responsable(tx, id, anteriorId) {
@@ -275,37 +280,81 @@
         };
       });
       const contexto = _contexto(tx, 'tarjetas', fila);
+      const responsablesAntes = anterior
+        ? _idsTarjeta(tx, 'tarjeta_responsables', 'responsable_id', fila.id) : [];
+      const etiquetasAntes = anterior
+        ? _idsTarjeta(tx, 'tarjeta_etiquetas', 'etiqueta_id', fila.id) : [];
+      let responsablesDespues = responsablesAntes;
+      let etiquetasDespues = etiquetasAntes;
       if (Object.hasOwn(entrada, 'responsables')) {
-        const anteriores = anterior ? _idsTarjeta(tx, 'tarjeta_responsables', 'responsable_id', fila.id) : [];
         const responsables = _validarAsignaciones(tx, entrada.responsables, 'responsables',
-          'tarjeta_responsables', fila.id, anteriores, 'responsables');
+          'tarjeta_responsables', fila.id, responsablesAntes, 'responsables');
+        responsablesDespues = responsables;
         for (const id of responsables) {
           tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
         }
       } else if (Object.hasOwn(entrada, 'responsable_id')) {
         const responsables = fila.responsable_id ? [fila.responsable_id] : [];
-        const anteriores = anterior ? _idsTarjeta(tx, 'tarjeta_responsables', 'responsable_id', fila.id) : [];
         const validos = _validarAsignaciones(tx, responsables, 'responsables',
-          'tarjeta_responsables', fila.id, anteriores, 'responsables');
+          'tarjeta_responsables', fila.id, responsablesAntes, 'responsables');
+        responsablesDespues = validos;
         for (const id of validos) {
           tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
         }
       }
       if (Object.hasOwn(entrada, 'etiquetas')) {
-        const anteriores = anterior ? _idsTarjeta(tx, 'tarjeta_etiquetas', 'etiqueta_id', fila.id) : [];
         const etiquetas = _validarAsignaciones(tx, entrada.etiquetas, 'etiquetas',
-          'tarjeta_etiquetas', fila.id, anteriores, 'etiquetas');
+          'tarjeta_etiquetas', fila.id, etiquetasAntes, 'etiquetas');
+        etiquetasDespues = etiquetas;
         for (const id of etiquetas) {
           tx.run('INSERT INTO tarjeta_etiquetas (tarjeta_id,etiqueta_id) VALUES (?,?)', [fila.id, id]);
         }
       }
-      _evento(tx, contexto, anterior ? 'tarjeta_modificada' : 'tarjeta_creada', fila.titulo);
-      if (anterior) {
-        for (const [campo, tipo] of [['responsable_id', 'responsable_cambiado'], ['prioridad', 'prioridad_cambiada'],
-          ['vencimiento', 'vencimiento_cambiado'], ['completada', fila.completada ? 'tarea_completada' : 'tarea_reabierta']]) {
+      if (!anterior) {
+        _evento(tx, contexto, 'tarjeta_creada', 'Se creó la tarjeta «' + fila.titulo + '».', fila.titulo);
+        for (const id of responsablesDespues) {
+          _evento(tx, contexto, 'responsable_asignado',
+            JSON.stringify({ nombre: _registro(tx, 'responsables', id).nombre }), fila.titulo);
+        }
+        for (const id of etiquetasDespues) {
+          _evento(tx, contexto, 'etiqueta_agregada',
+            JSON.stringify({ nombre: _registro(tx, 'etiquetas', id).nombre }), fila.titulo);
+        }
+      } else {
+        const cambios = [
+          ['titulo', 'titulo_cambiado'],
+          ['descripcion', 'descripcion_cambiada'],
+          ['prioridad', 'prioridad_cambiada'],
+          ['inicio', 'inicio_cambiado'],
+          ['vencimiento', 'vencimiento_cambiado'],
+          ['observaciones', 'observaciones_cambiadas']
+        ];
+        for (const [campo, tipo] of cambios) {
           if (anterior[campo] !== fila[campo]) {
-            _evento(tx, contexto, tipo, JSON.stringify({ anterior: anterior[campo], actual: fila[campo] }));
+            _evento(tx, contexto, tipo, JSON.stringify({
+              anterior: anterior[campo], actual: fila[campo]
+            }), fila.titulo);
           }
+        }
+        if (anterior.completada !== fila.completada) {
+          _evento(tx, contexto, fila.completada ? 'tarea_completada' : 'tarea_reabierta',
+            fila.titulo, fila.titulo);
+        }
+        for (const id of responsablesAntes.filter(id => !responsablesDespues.includes(id))) {
+          _evento(tx, contexto, 'responsable_retirado',
+            JSON.stringify({ nombre: _registro(tx, 'responsables', id).nombre }), fila.titulo);
+        }
+        for (const id of responsablesDespues.filter(id => !responsablesAntes.includes(id))) {
+          _evento(tx, contexto, 'responsable_asignado',
+            JSON.stringify({ nombre: _registro(tx, 'responsables', id).nombre }), fila.titulo);
+        }
+        for (const id of etiquetasAntes.filter(id => !etiquetasDespues.includes(id))) {
+          _evento(tx, contexto, 'etiqueta_retirada',
+            JSON.stringify({ nombre: _registro(tx, 'etiquetas', id).nombre }), fila.titulo);
+        }
+        for (const id of etiquetasDespues.filter(id => !etiquetasAntes.includes(id))) {
+          _evento(tx, contexto, 'etiqueta_agregada',
+            JSON.stringify({ nombre: _registro(tx, 'etiquetas', id).nombre }), fila.titulo);
         }
       }
       return fila.id;
@@ -358,6 +407,13 @@
       const ids = tx.all('SELECT id FROM tarjetas WHERE lista_id=? AND archivada=0 AND id<>? ORDER BY posicion,id',
         [destinoId, id]).map(fila => fila.id);
       if (!Number.isInteger(posicion) || posicion < 0 || posicion > ids.length) throw new Error('La posición de destino no es válida.');
+      if (origen.id === destino.id) {
+        const ordenActual = tx.all('SELECT id FROM tarjetas WHERE lista_id=? AND archivada=0 ORDER BY posicion,id',
+          [origen.id]).map(fila => fila.id);
+        const ordenNuevo = ids.slice();
+        ordenNuevo.splice(posicion, 0, id);
+        if (ordenActual.every((tarjetaId, indice) => tarjetaId === ordenNuevo[indice])) return id;
+      }
       const completada = origen.id === destino.id ? tarjeta.completada : Number(destino.categoria === 'completado');
       if (origen.id !== destino.id && posicion === ids.length) {
         const siguientePosicion = tx.all('SELECT coalesce(max(posicion),-1)+1 AS posicion FROM tarjetas WHERE lista_id=?',
@@ -367,7 +423,7 @@
         const contexto = _contexto(tx, 'tarjetas', { ...tarjeta, lista_id: destinoId });
         _evento(tx, contexto, 'tarjeta_movida', JSON.stringify({
           desde: origen.nombre, hasta: destino.nombre, posicion: siguientePosicion
-        }));
+        }), tarjeta.titulo);
         if (tarjeta.completada !== completada) {
           _evento(tx, contexto, completada ? 'tarea_completada' : 'tarea_reabierta', tarjeta.titulo);
         }
@@ -380,7 +436,11 @@
         .map(fila => fila.id);
       _ordenar(tx, 'tarjetas', [...ids, ...archivadas]);
       const contexto = _contexto(tx, 'tarjetas', { ...tarjeta, lista_id: destinoId });
-      _evento(tx, contexto, 'tarjeta_movida', JSON.stringify({ desde: origen.nombre, hasta: destino.nombre, posicion }));
+      const reordenada = origen.id === destino.id;
+      _evento(tx, contexto, reordenada ? 'tarjeta_reordenada' : 'tarjeta_movida',
+        JSON.stringify(reordenada
+          ? { etapa: destino.nombre, desdePosicion: tarjeta.posicion, hastaPosicion: posicion }
+          : { desde: origen.nombre, hasta: destino.nombre, posicion }), tarjeta.titulo);
       if (tarjeta.completada !== completada) {
         _evento(tx, contexto, completada ? 'tarea_completada' : 'tarea_reabierta', tarjeta.titulo);
       }
@@ -406,6 +466,16 @@
         throw new Error('Las tarjetas seleccionadas deben pertenecer al mismo tablero.');
       }
       const movidas = new Set(movimientos.map(m => m.id));
+      const listasAfectadas = new Set(filas.flatMap(({ origen, destino }) => [origen.id, destino.id]));
+      const ordenesIniciales = new Map(Array.from(listasAfectadas, listaId => [listaId, tx.all(
+        'SELECT id FROM tarjetas WHERE lista_id=? AND archivada=0 ORDER BY posicion,id', [listaId]
+      ).map(fila => fila.id)]));
+      const ordenesFinales = new Map();
+      for (const listaId of listasAfectadas) {
+        const restantes = ordenesIniciales.get(listaId).filter(tarjetaId => !movidas.has(tarjetaId));
+        const entrantes = filas.filter(fila => fila.destino.id === listaId).map(fila => fila.tarjeta.id);
+        ordenesFinales.set(listaId, [...restantes, ...entrantes]);
+      }
       const posiciones = new Map();
       for (const { destino } of filas) {
         if (!posiciones.has(destino.id)) {
@@ -415,14 +485,20 @@
       }
       for (const { tarjeta, origen, destino } of filas) {
         const completada = origen.id === destino.id ? tarjeta.completada : Number(destino.categoria === 'completado');
+        const ordenAnterior = ordenesIniciales.get(origen.id);
+        const ordenNuevo = ordenesFinales.get(destino.id);
+        if (origen.id === destino.id && completada === tarjeta.completada &&
+            ordenAnterior.indexOf(tarjeta.id) === ordenNuevo.indexOf(tarjeta.id)) continue;
         const posicion = posiciones.get(destino.id);
         posiciones.set(destino.id, posicion + 1);
         tx.run(`UPDATE tarjetas SET lista_id=?,completada=?,posicion=?,updated_at=${AHORA} WHERE id=?`,
           [destino.id, completada, posicion, tarjeta.id]);
         const contexto = _contexto(tx, 'tarjetas', { ...tarjeta, lista_id: destino.id });
-        _evento(tx, contexto, 'tarjeta_movida', JSON.stringify({
-          desde: origen.nombre, hasta: destino.nombre, posicion
-        }));
+        const reordenada = origen.id === destino.id;
+        _evento(tx, contexto, reordenada ? 'tarjeta_reordenada' : 'tarjeta_movida',
+          JSON.stringify(reordenada
+            ? { etapa: destino.nombre, desdePosicion: tarjeta.posicion, hastaPosicion: posicion }
+            : { desde: origen.nombre, hasta: destino.nombre, posicion }), tarjeta.titulo);
         if (tarjeta.completada !== completada) {
           _evento(tx, contexto, completada ? 'tarea_completada' : 'tarea_reabierta', tarjeta.titulo);
         }
@@ -472,6 +548,29 @@
     getTarjetaEtiquetas(id) {
       return PSA.DB.consultar('SELECT e.* FROM etiquetas e JOIN tarjeta_etiquetas te ON te.etiqueta_id=e.id WHERE te.tarjeta_id=? ORDER BY e.nombre,e.id', [id]);
     },
-    getActividad() { return PSA.DB.consultar('SELECT * FROM actividad ORDER BY id DESC'); }
+    getActividad(filtros = {}) {
+      const condiciones = [];
+      const parametros = [];
+      for (const [campo, valor] of [['tarjeta_id', filtros.tarjetaId], ['tablero_id', filtros.tableroId]]) {
+        if (valor !== undefined && valor !== null && valor !== '') {
+          if (typeof valor !== 'string') throw new Error('El filtro de actividad no es válido.');
+          condiciones.push(campo + '=?');
+          parametros.push(valor);
+        }
+      }
+      if (filtros.antesId !== undefined && filtros.antesId !== null) {
+        if (!Number.isSafeInteger(filtros.antesId) || filtros.antesId <= 0) {
+          throw new Error('El cursor de actividad no es válido.');
+        }
+        condiciones.push('id<?');
+        parametros.push(filtros.antesId);
+      }
+      const limite = filtros.limite === undefined ? 100 : filtros.limite;
+      if (!Number.isInteger(limite) || limite < 1) throw new Error('El límite de actividad no es válido.');
+      parametros.push(Math.min(limite, 200));
+      return PSA.DB.consultar('SELECT * FROM actividad' +
+        (condiciones.length ? ' WHERE ' + condiciones.join(' AND ') : '') +
+        ' ORDER BY id DESC LIMIT ?', parametros);
+    }
   };
 })();

@@ -42,7 +42,9 @@
   function _filtrosTarjetasActivos() {
     return !!_textoFiltro($('filtro-tarjetas-texto').value) ||
       ['responsable', 'etiqueta', 'prioridad', 'lista', 'asignacion']
-        .some(nombre => !!$('filtro-tarjetas-' + nombre).value);
+        .some(nombre => !!$('filtro-tarjetas-' + nombre).value) ||
+      !!$('filtro-tarjetas-plazo').value ||
+      !!$('filtro-fechas-desde').value || !!$('filtro-fechas-hasta').value;
   }
 
   function _filtrosTarjetas() {
@@ -52,7 +54,10 @@
       etiqueta: $('filtro-tarjetas-etiqueta').value,
       prioridad: $('filtro-tarjetas-prioridad').value,
       lista: $('filtro-tarjetas-lista').value,
-      asignacion: $('filtro-tarjetas-asignacion').value
+      asignacion: $('filtro-tarjetas-asignacion').value,
+      plazo: $('filtro-tarjetas-plazo').value,
+      desde: $('filtro-fechas-desde').value,
+      hasta: $('filtro-fechas-hasta').value
     };
   }
 
@@ -60,12 +65,32 @@
     const responsables = (tarjeta.responsables || []).map(r => r.id);
     const etiquetas = (tarjeta.etiquetas || []).map(etiqueta => etiqueta.id);
     const texto = _textoFiltro(tarjeta.titulo + ' ' + tarjeta.descripcion);
-    return (!filtros.texto || texto.includes(filtros.texto)) &&
+    const fecha = tarjeta.vencimiento;
+    const hoy = _hoy();
+    const proximo = _sumarDias(hoy, 6);
+    const coincidePlazo = !filtros.plazo ||
+      (filtros.plazo === 'con' && !!fecha) ||
+      (filtros.plazo === 'sin' && !fecha) ||
+      (filtros.plazo === 'vencidas' && !tarjeta.completada && !!fecha && fecha < hoy) ||
+      (filtros.plazo === 'hoy' && !tarjeta.completada && fecha === hoy) ||
+      (filtros.plazo === 'proximos7' && !tarjeta.completada && !!fecha && fecha >= hoy && fecha <= proximo) ||
+      (filtros.plazo === 'intervalo' && !!fecha &&
+        (!filtros.desde || fecha >= filtros.desde) && (!filtros.hasta || fecha <= filtros.hasta) &&
+        (!!filtros.desde || !!filtros.hasta));
+    return coincidePlazo &&
+      (!filtros.texto || texto.includes(filtros.texto)) &&
       (!filtros.responsable || responsables.includes(filtros.responsable)) &&
       (!filtros.etiqueta || etiquetas.includes(filtros.etiqueta)) &&
       (!filtros.prioridad || tarjeta.prioridad === filtros.prioridad) &&
       (!filtros.lista || tarjeta.lista_id === filtros.lista) &&
       (!filtros.asignacion || (filtros.asignacion === 'con' ? responsables.length > 0 : responsables.length === 0));
+  }
+
+  function _sumarDias(fecha, dias) {
+    const [anio, mes, dia] = fecha.split('-').map(Number);
+    const resultado = new Date(anio, mes - 1, dia);
+    resultado.setDate(resultado.getDate() + dias);
+    return `${resultado.getFullYear()}-${String(resultado.getMonth() + 1).padStart(2, '0')}-${String(resultado.getDate()).padStart(2, '0')}`;
   }
 
   function _actualizarOpcionesFiltro(listas) {
@@ -116,7 +141,9 @@
   }
 
   function _tarjetaHTML(tarjeta, bloqueada, listas, tarjetasActivas) {
-    const vencida = !tarjeta.completada && tarjeta.vencimiento && tarjeta.vencimiento < _hoy() && !bloqueada;
+    const hoy = _hoy();
+    const fechaProxima = _sumarDias(hoy, 6);
+    const vencida = !tarjeta.completada && tarjeta.vencimiento && tarjeta.vencimiento < hoy && !bloqueada;
     const prioridad = ['Alta', 'Urgente'].includes(tarjeta.prioridad) ? ' work-priority-high' : '';
     const seleccionada = tarjetasSeleccionadas.has(tarjeta.id);
     const posicion = tarjetasActivas.findIndex(fila => fila.id === tarjeta.id);
@@ -146,8 +173,14 @@
       <div class="work-badges"><span class="work-badge work-badge-priority">Prioridad: ${e(prioridadNombre)}</span>${etiquetasHTML}</div>
       <div class="work-badges">${responsablesHTML || '<span class="work-badge">Sin responsables</span>'}</div>
       <p class="work-meta">${tarjeta.completada ? 'Completada' : ''}${tarjeta.archivada ? ' · Archivada' : ''}</p>
-      <p class="${vencida ? 'work-overdue' : 'work-meta'}">${vencida ? 'Vencida · ' : 'Vencimiento: '}${e(PSA.formatFecha(tarjeta.vencimiento))}</p>
+      ${tarjeta.inicio ? `<p class="work-meta">Inicio: ${e(PSA.formatFecha(tarjeta.inicio))}</p>` : ''}
+      <p class="${vencida ? 'work-overdue' : 'work-meta'}">${
+        !tarjeta.vencimiento ? 'Sin vencimiento' : vencida ? 'Vencida · ' :
+          tarjeta.completada ? 'Vencimiento cumplido · ' :
+            tarjeta.vencimiento <= fechaProxima ? 'Vence pronto · ' : 'Vencimiento · '
+      }${tarjeta.vencimiento ? e(PSA.formatFecha(tarjeta.vencimiento)) : ''}</p>
       <div class="actions no-print work-card-move">
+        ${_boton('Historial', 'historial-tarjeta', tarjeta.id, PSA.DB.ocupado)}
         ${_boton('Subir en la etapa', 'tarjeta-posicion-anterior', tarjeta.id,
           noMovible || arrastreDeshabilitado || posicion <= 0)}
         ${_boton('Bajar en la etapa', 'tarjeta-posicion-siguiente', tarjeta.id,
@@ -199,7 +232,9 @@
     const filtros = _filtrosTarjetas();
     const tarjetasBase = tarjetas.filter(t => !t.archivada && !t.lista_archivada &&
       !t.tablero_archivado && !t.proyecto_archivado);
-    const coincidencias = tarjetasBase.filter(t => _coincideTarjeta(t, filtros));
+    const rangoInvalido = filtros.plazo === 'intervalo' && filtros.desde && filtros.hasta &&
+      filtros.desde > filtros.hasta;
+    const coincidencias = rangoInvalido ? [] : tarjetasBase.filter(t => _coincideTarjeta(t, filtros));
     const idsVisibles = new Set(coincidencias.map(t => t.id));
     const filtrosActivos = _filtrosTarjetasActivos();
     const idsActivos = new Set(tarjetas.filter(t => !t.archivada && !t.lista_archivada &&
@@ -215,7 +250,9 @@
       : 'Seleccione tarjetas con sus casillas o con «Seleccionar etapa».';
     $('tablero-incluir-seleccion-oculta').disabled = seleccionadasOcultas === 0;
     $('tablero-resultados').textContent = coincidencias.length + ' de ' + tarjetasBase.length + ' tarjetas coinciden.';
-    $('tablero-filtros-estado').textContent = filtrosActivos
+    $('tablero-filtros-estado').textContent = rangoInvalido
+      ? 'El inicio del intervalo no puede ser posterior a su fin.'
+      : filtrosActivos
       ? 'Hay filtros activos. El arrastre y el reordenamiento por posición están deshabilitados para proteger las tarjetas ocultas.'
       : '';
     if (!coincidencias.length) {
@@ -269,8 +306,19 @@
     }
     if (filtros.asignacion) resumenFiltros.push('Asignación: ' +
       (filtros.asignacion === 'con' ? 'con responsables' : 'sin responsables'));
+    const nombresPlazo = {
+      con: 'con vencimiento', sin: 'sin vencimiento', vencidas: 'vencidas',
+      hoy: 'vencen hoy', proximos7: 'vencen en los próximos 7 días',
+      intervalo: 'vencen entre ' + (filtros.desde || 'cualquier fecha') + ' y ' + (filtros.hasta || 'cualquier fecha')
+    };
+    if (filtros.plazo) resumenFiltros.push('Plazo: ' + nombresPlazo[filtros.plazo]);
+    if (filtros.plazo === 'intervalo' && (filtros.desde || filtros.hasta)) {
+      resumenFiltros.push('Rango: ' + (filtros.desde || 'sin inicio') + ' – ' + (filtros.hasta || 'sin fin'));
+    }
     if (filtrosActivos) {
-      $('tablero-filtros-estado').textContent = 'Filtros activos: ' + resumenFiltros.join(' · ') +
+      $('tablero-filtros-estado').textContent = (rangoInvalido
+        ? 'El inicio del intervalo no puede ser posterior a su fin. '
+        : '') + 'Filtros activos: ' + resumenFiltros.join(' · ') +
         '. Arrastre y reordenamiento por posición deshabilitados para proteger las tarjetas ocultas.';
       if (!coincidencias.length) $('tablero-filtros-estado').textContent +=
         ' No hay tarjetas que coincidan; pruebe otros criterios o limpie los filtros.';
@@ -587,6 +635,17 @@
     $('tableros-proyecto').focus();
   }
 
+  function abrirTarjeta(id) {
+    const tarjeta = PSA.Trabajo.getTarjetas().find(fila => fila.id === id);
+    if (!tarjeta) throw new Error('La tarjeta ya no existe.');
+    tableroId = tarjeta.tablero_id;
+    tarjetasSeleccionadas.clear();
+    render();
+    PSA.cambiarTab('v-tableros', 'v-tableros');
+    _renderDetalle();
+    editar('tarjeta', id);
+  }
+
   function _instantanea() {
     return JSON.stringify(Array.from(new FormData($('trabajo-form')).entries()));
   }
@@ -794,11 +853,15 @@
       else if (accion === 'lista') editar('lista', id);
       else if (accion === 'nueva-tarjeta') editar('tarjeta', null, id);
       else if (accion === 'tarjeta') editar('tarjeta', id);
+      else if (accion === 'historial-tarjeta') PSA.Actividad.mostrarTarjeta(id);
       else if (accion.startsWith('archivo-')) await _archivar(accion.slice(8), id);
       else if (accion === 'limpiar-filtros-tarjetas') {
         ['filtro-tarjetas-texto', 'filtro-tarjetas-responsable', 'filtro-tarjetas-etiqueta',
-          'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion']
+          'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion',
+          'filtro-tarjetas-plazo', 'filtro-fechas-desde', 'filtro-fechas-hasta']
           .forEach(control => { $(control).value = ''; });
+        $('filtro-fechas-desde').disabled = true;
+        $('filtro-fechas-hasta').disabled = true;
         $('tablero-incluir-seleccion-oculta').checked = false;
         render();
       }
@@ -881,9 +944,17 @@
       }
     });
     ['filtro-tarjetas-texto', 'filtro-tarjetas-responsable', 'filtro-tarjetas-etiqueta',
-      'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion']
+      'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion',
+      'filtro-tarjetas-plazo', 'filtro-fechas-desde', 'filtro-fechas-hasta']
       .forEach(id => $(id).addEventListener(id === 'filtro-tarjetas-texto' ? 'input' : 'change', () => {
         $('tablero-incluir-seleccion-oculta').checked = false;
+        const intervalo = $('filtro-tarjetas-plazo').value === 'intervalo';
+        if (id === 'filtro-tarjetas-plazo' && !intervalo) {
+          $('filtro-fechas-desde').value = '';
+          $('filtro-fechas-hasta').value = '';
+        }
+        $('filtro-fechas-desde').disabled = !intervalo;
+        $('filtro-fechas-hasta').disabled = !intervalo;
         render();
       }));
     $('buscar-responsables').addEventListener('input', render);
@@ -901,5 +972,8 @@
     dialog().addEventListener('keydown', event => { if (event.key === 'Escape') event.stopPropagation(); });
   });
 
-  PSA.Tableros = { render, abrirProyecto, reiniciar, actualizarEstado, get editorAbierto() { return dialog().open; } };
+  PSA.Tableros = {
+    render, abrirProyecto, abrirTarjeta, reiniciar, actualizarEstado,
+    get editorAbierto() { return dialog().open; }
+  };
 })();

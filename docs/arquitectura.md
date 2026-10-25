@@ -1,8 +1,8 @@
 # Arquitectura — Gestión de Proyectos PSA
 
-**Versión de esquema:** 2 (persistencia relacional, Kanban y organización de fase 5)
+**Versión de esquema:** 3 (calendario e historial de actividad de fase 6)
 
-**Fecha:** 2026-10-24
+**Fecha:** 2026-10-25
 
 ## Visión general
 
@@ -15,11 +15,13 @@ index.html + css/styles.css
           |
        js/app.js (bootstrap, conexión, notificaciones)
           |
-   +------+----------------+----------------+
+   +------+-----------+------------+------------------+
    |                       |                |
 js/proyectos.js       js/dashboard.js   js/tableros.js
    |                       |                |
-   |                       |           js/trabajo.js
+   |                 js/calendario.js  js/actividad.js
+   |                       |                |
+   +-----------------------+-----------js/trabajo.js
    +-------- js/db.js -----+----------------+
                  |
            sql.js / WASM
@@ -33,7 +35,7 @@ js/proyectos.js       js/dashboard.js   js/tableros.js
 
 ### Presentación
 
-[index.html](../index.html) contiene cabecera, conexión, overlays, formulario/listado de proyectos, dashboard y sección de tableros con un único diálogo reutilizable. [styles.css](../css/styles.css) concentra estilos, variables, estados, columnas con desplazamiento horizontal, adaptación móvil e impresión.
+[index.html](../index.html) contiene cabecera, conexión, overlays, formulario/listado de proyectos, dashboard, tableros, calendario e historial, además de un único diálogo reutilizable para editar tarjetas. [styles.css](../css/styles.css) concentra estilos, variables, estados, columnas con desplazamiento horizontal, vistas temporales, adaptación móvil e impresión.
 
 La cabecera mantiene visible la opción de cambiar de carpeta. Se muestran el nombre de la carpeta, el archivo y el estado de operación o error. No se presenta ese nombre como una ruta absoluta.
 
@@ -125,6 +127,8 @@ IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selecc
 - `guardarTablero`, `guardarLista`, `guardarTarjeta` y `archivar` esperan transacción y escritura confirmadas antes de renderizar/notificar. Los errores se registran y se muestran; un guardado fallido conserva el diálogo y sus datos.
 - `getTableros`, `getListas`, `getTarjetas`, `getResponsables` y `DB.getProyectos` son las únicas fuentes de datos. La UI no ejecuta SQL, no recrea tablas y no usa localStorage.
 - El mismo `<dialog>` nativo cambia sus campos según entidad. Cuenta con etiquetas, título/contexto accesibles, contención de foco, Esc/cancelación con confirmación de descarte y retorno de foco a un elemento existente tras renderizar.
+- `PSA.Calendario` deriva las vistas mensual, semanal y de agenda desde tarjetas confirmadas, agrupa cada tarjeta por fecha de inicio y/o vencimiento y reutiliza el editor de tarjetas. No persiste ni convierte fechas de calendario a instantes.
+- `PSA.Actividad` consulta historial reciente o filtrado por tablero/tarjeta, en páginas de 100 filas; las descripciones se insertan como texto escapado y los botones abren la tarjeta existente cuando aún está disponible.
 - Archivados y descendientes de contenedores archivados son de solo lectura. Restaurar un padre no altera marcas propias de hijos. El selector de proyecto se bloquea al editar tablero; una categoría de lista con tarjetas también se bloquea según el contrato existente.
 - El estado global de DB bloquea acciones de tablero y editor mientras se escribe. Los atajos históricos no interfieren con el diálogo. Un cambio de base confirmado reinicia selección y filtros; una conexión fallida no los descarta.
 - Los controles **Ordenar lista antes/después** solo llaman `reordenarListas`; cambiar una columna de lugar no cambia la lista de sus tarjetas.
@@ -201,7 +205,7 @@ El DDL canónico está en [migraciones.js](../js/migraciones.js). La tabla `proy
 - `objetivo`, `resultado`, `observaciones`: TEXT.
 - `created_at`, `updated_at`: fechas de creación y última modificación.
 
-El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de responsable a proyectos. El esquema 2 agrega `tarjeta_responsables` (relación M:N) y el indicador `etiquetas.archivado`; la migración copia los vínculos existentes de `tarjetas.responsable_id` sin quitar esa columna histórica. Los responsables y etiquetas se desactivan de forma lógica para preservar asignaciones anteriores. Las tarjetas mantienen prioridad SQLite histórica `Urgente` como valor interno compatible, que la interfaz presenta como **Crítica**; la prioridad predeterminada sigue siendo `Media`. Los valores se envían mediante parámetros SQL; los identificadores provienen de constantes internas. No se crean vistas SQL. El formulario histórico de proyectos permanece sin cambios.
+El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de responsable a proyectos. El esquema 2 agrega `tarjeta_responsables` (relación M:N) y el indicador `etiquetas.archivado`; la migración copia los vínculos existentes de `tarjetas.responsable_id` sin quitar esa columna histórica. El esquema 3 agrega `actividad.tarjeta_titulo`, rellenándolo con el título actual de las tarjetas para dar contexto a eventos ya existentes. Los responsables y etiquetas se desactivan de forma lógica para preservar asignaciones anteriores. Las tarjetas mantienen prioridad SQLite histórica `Urgente` como valor interno compatible, que la interfaz presenta como **Crítica**; la prioridad predeterminada sigue siendo `Media`. Las fechas se almacenan como texto local `YYYY-MM-DD`; búsquedas de vencimiento comparan valores ISO por día, sin UTC. Los valores se envían mediante parámetros SQL; los identificadores provienen de constantes internas. No se crean vistas SQL. El formulario histórico de proyectos permanece sin cambios.
 
 ## Decisiones y límites
 
@@ -217,7 +221,7 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 
 ## Verificación
 
-[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 5 aprobó **35 pruebas**.
+[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 6 aprobó **37 pruebas**, incluidas migración/rollback sintéticos y actividad de tarjeta.
 
 ```powershell
 node --test tests\db.test.cjs
@@ -225,6 +229,8 @@ node --test tests\db.test.cjs
 
 Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
 
+La prueba de navegador `probarFase6Seguimiento()` aprobó **24 comprobaciones** para calendario mensual/semanal/agenda, navegación, fechas atrasadas/próximas, apertura de tarjetas, historial por tarjeta/tablero/páginas y filtros temporales combinados. Las regresiones DOM de fases 3 a 5 aprobaron 42, 26, 25 y 18 comprobaciones, respectivamente. Se comprobaron 390, 768 y 1280 px sin desbordamiento de página ni del calendario.
+
 ## Evolución propuesta
 
-El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 5 implementadas, con esquema vigente 2. Mis tareas, calendario e historial visual permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
+El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 6 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).

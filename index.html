@@ -38,6 +38,10 @@
           onclick="PSA.cambiarTab('v-proyectos', this)">Proyectos</button>
   <button role="tab" aria-selected="false" data-view="v-tableros"
           onclick="PSA.cambiarTab('v-tableros', this)">Tableros</button>
+  <button role="tab" aria-selected="false" data-view="v-calendario"
+          onclick="PSA.cambiarTab('v-calendario', this)">Calendario</button>
+  <button role="tab" aria-selected="false" data-view="v-actividad"
+          onclick="PSA.cambiarTab('v-actividad', this)">Actividad</button>
 </nav>
 
 <!-- ══════════════════════════════════════════
@@ -374,6 +378,14 @@
             <option value="">Todas</option><option value="con">Con responsables</option>
             <option value="sin">Sin responsables</option>
           </select></label>
+          <label>Vencimiento<select id="filtro-tarjetas-plazo">
+            <option value="">Cualquier fecha</option><option value="con">Con vencimiento</option>
+            <option value="sin">Sin vencimiento</option><option value="vencidas">Vencidas</option>
+            <option value="hoy">Vencen hoy</option><option value="proximos7">Próximos 7 días</option>
+            <option value="intervalo">Intervalo</option>
+          </select></label>
+          <label>Desde<input id="filtro-fechas-desde" type="date" disabled></label>
+          <label>Hasta<input id="filtro-fechas-hasta" type="date" disabled></label>
           <button type="button" class="btn btn-ghost" data-accion="limpiar-filtros-tarjetas">Limpiar filtros</button>
         </div>
         <p id="tablero-resultados" class="work-meta" role="status" aria-live="polite"></p>
@@ -406,6 +418,40 @@
         </div>
       </div>
       <div id="tablero-columnas" class="kanban" aria-label="Listas y tarjetas del tablero"></div>
+    </div>
+  </section>
+
+  <section id="v-calendario" class="view" role="tabpanel" aria-label="Calendario de tarjetas">
+    <div class="card">
+      <h2>Calendario de tareas</h2>
+      <p class="work-meta">Se muestran las fechas de inicio y vencimiento. Las fechas son locales y no se convierten a UTC.
+        Un vencimiento dentro de hoy o los próximos seis días se indica como próximo.</p>
+      <div class="calendar-toolbar no-print">
+        <label>Vista<select id="calendario-vista">
+          <option value="mes">Mensual</option><option value="semana">Semanal</option>
+          <option value="agenda">Agenda</option>
+        </select></label>
+        <button type="button" class="btn btn-ghost" id="calendario-anterior">Período anterior</button>
+        <button type="button" class="btn btn-ghost" id="calendario-hoy">Hoy</button>
+        <button type="button" class="btn btn-ghost" id="calendario-siguiente">Período siguiente</button>
+      </div>
+      <h3 id="calendario-periodo" aria-live="polite"></h3>
+      <p id="calendario-estado" class="work-meta" role="status" aria-live="polite"></p>
+      <div id="calendario-contenido"></div>
+    </div>
+  </section>
+
+  <section id="v-actividad" class="view" role="tabpanel" aria-label="Historial de actividad">
+    <div class="card">
+      <h2>Historial de actividad</h2>
+      <div class="filters no-print">
+        <label>Tablero<select id="actividad-tablero"><option value="">Todos los tableros</option></select></label>
+        <button type="button" class="btn btn-ghost" id="actividad-limpiar">Ver actividad reciente</button>
+      </div>
+      <p id="actividad-contexto" class="work-meta" role="status" aria-live="polite"></p>
+      <p id="actividad-error" class="form-error" role="alert"></p>
+      <ol id="actividad-lista" class="activity-list"></ol>
+      <button type="button" class="btn btn-ghost hidden" id="actividad-mas">Cargar actividad anterior</button>
     </div>
   </section>
 </main>
@@ -442,6 +488,8 @@
 <script src="js/trabajo.js"></script>
 <script src="js/proyectos.js"></script>
 <script src="js/tableros.js"></script>
+<script src="js/calendario.js"></script>
+<script src="js/actividad.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/app.js"></script>
 

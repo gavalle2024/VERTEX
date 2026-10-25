@@ -62,11 +62,13 @@ PSA.cambiarTab = function (viewId, btnOrKey) {
   });
 };
 
-/** Renderiza todos los módulos (tabla + dashboard). */
+/** Renderiza todos los módulos de la aplicación desde el estado confirmado. */
 PSA.renderTodo = function () {
   PSA.Proyectos.renderTabla();
   PSA.Dashboard.render();
   PSA.Tableros.render();
+  PSA.Calendario.render();
+  PSA.Actividad.render();
 };
 
 /* ════════════════════════════════════════
@@ -121,6 +123,8 @@ function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, 
   document.querySelectorAll('main, header, nav.tabs').forEach(el => { el.inert = !!requiereMigracion; });
   document.getElementById('v-tableros').inert = !!ocupado;
   document.getElementById('v-tableros').setAttribute('aria-busy', String(!!ocupado));
+  document.getElementById('v-calendario').setAttribute('aria-busy', String(!!ocupado));
+  document.getElementById('v-actividad').setAttribute('aria-busy', String(!!ocupado));
   PSA.Tableros.actualizarEstado();
   if (requiereMigracion) {
     if (overlayEl) overlayEl.classList.add('hidden');
@@ -203,6 +207,8 @@ PSA.gestionarConexionDB = async function (elegirCarpeta = false) {
     if (resultado.ok) {
       PSA.Proyectos.limpiarForm();
       PSA.Tableros.reiniciar();
+      PSA.Calendario.reiniciar();
+      PSA.Actividad.reiniciar();
       PSA.renderTodo();
       PSA.toast(PSA.DB.estado.error || 'Conectado a ' + PSA.DB.estado.ubicacion, PSA.DB.estado.error ? 'error' : undefined);
     }
@@ -218,6 +224,8 @@ PSA.confirmarMigracion = async function () {
     if (!resultado.ok) return;
     PSA.Proyectos.limpiarForm();
     PSA.Tableros.reiniciar();
+    PSA.Calendario.reiniciar();
+    PSA.Actividad.reiniciar();
     PSA.renderTodo();
     PSA.toast('Base actualizada. Respaldo: ' + resultado.respaldo);
   } catch (e) {

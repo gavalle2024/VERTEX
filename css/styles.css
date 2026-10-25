@@ -559,6 +559,55 @@ tr:hover td { background: #f7f9fc; }
   .catalog-admin { grid-template-columns: 1fr; }
 }
 
+/* ── CALENDARIO E HISTORIAL ── */
+.calendar-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.calendar-toolbar label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
+.calendar-toolbar select { min-width: 130px; }
+.calendar-grid { display: grid; gap: 5px; }
+.calendar-month { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-weekday { padding: 6px 4px; color: var(--navy); font-size: 12px; font-weight: 700; text-align: center; }
+.calendar-day { min-width: 0; min-height: 112px; padding: 7px; border: 1px solid var(--border); border-radius: 5px; background: #fff; overflow: hidden; }
+.calendar-day h4 { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 0 0 5px; color: var(--navy); font-size: 13px; }
+.calendar-day-outside { background: var(--bg); color: var(--muted); }
+.calendar-day-today { border: 2px solid var(--gold-d); }
+.calendar-today-label { font-size: 10px; }
+.calendar-empty-day { margin: 0; color: var(--border); text-align: center; }
+.calendar-event { min-width: 0; margin: 4px 0; padding: 5px; border-left: 3px solid var(--navy2); border-radius: 3px; background: var(--bg); overflow-wrap: anywhere; }
+.calendar-event-overdue { border-left-color: var(--danger); }
+.calendar-event-heading { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 3px; }
+.calendar-open-card { padding: 0; border: 0; color: var(--navy); background: transparent; font: inherit; font-size: 11px; font-weight: 700; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.calendar-event p { margin: 3px 0; font-size: 10px; }
+.calendar-event .work-badge { padding: 1px 4px; font-size: 9px; }
+.calendar-more { margin-top: 4px; font-size: 10px; }
+.calendar-more summary { color: var(--navy); cursor: pointer; font-weight: 700; }
+.calendar-agenda { display: grid; gap: 12px; margin: 0; padding-left: 24px; }
+.calendar-agenda > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.calendar-agenda h4 { margin: 0 0 6px; color: var(--navy); text-transform: capitalize; }
+.calendar-agenda-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 6px; }
+.activity-list { display: grid; gap: 10px; margin: 0 0 12px; padding-left: 24px; }
+.activity-item { padding: 10px 12px; border: 1px solid var(--border); border-left: 4px solid var(--navy2); border-radius: 5px; overflow-wrap: anywhere; }
+.activity-creation { border-left-color: var(--green); }
+.activity-assignment { border-left-color: var(--amber); }
+.activity-movement { border-left-color: var(--navy2); }
+.activity-state { border-left-color: var(--gold-d); }
+.activity-change { border-left-color: var(--muted); }
+.activity-type { display: inline-block; margin-top: 5px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--navy); background: var(--bg); font-size: 10px; font-weight: 700; }
+.activity-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; color: var(--navy); }
+.activity-heading time { color: var(--muted); font-size: 12px; font-weight: 400; }
+.activity-item p { margin: 6px 0; }
+@media (max-width: 600px) {
+  .calendar-day { min-height: 78px; padding: 3px; }
+  .calendar-day h4 { font-size: 11px; }
+  .calendar-event { padding: 2px; }
+  .calendar-event p, .calendar-history, .calendar-event .work-badge { display: none; }
+  .calendar-open-card { display: block; width: 100%; font-size: 9px; line-height: 1.2; }
+  .calendar-weekday { font-size: 10px; padding: 4px 1px; }
+  .calendar-day .calendar-more summary { font-size: 9px; overflow-wrap: anywhere; }
+  .calendar-toolbar { align-items: stretch; }
+  .calendar-toolbar button { flex: 1 1 28%; }
+}
+
 /* ── IMPRESIÓN ── */
 @media print {
   header .badge, .actions, .filters, .row-actions,

@@ -916,3 +916,167 @@ window.verificarReaperturaArrastre = function (anterior) {
   document.querySelector('[data-accion="abrir"][data-id="' + anterior.tableroId + '"]').click();
   return 'Posiciones y orden de tarjetas persistidos al reabrir';
 };
+
+window.probarFase6Seguimiento = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const fecha = dias => {
+    const valor = new Date();
+    valor.setDate(valor.getDate() + dias);
+    return `${valor.getFullYear()}-${String(valor.getMonth() + 1).padStart(2, '0')}-${String(valor.getDate()).padStart(2, '0')}`;
+  };
+  await window.prepararPruebaTableros();
+  const proyecto = {
+    ...PSA.DB.getProyectos()[0],
+    id: 'fase6-proyecto', nombre: 'Proyecto fase 6', responsable: 'Responsable local',
+    division: 'Prueba', inicio: fecha(0), meta: '', fin: '', estado: 'En curso',
+    avance: 0, implementacion: 'No iniciado', cumplimiento: 'En curso (pendiente de evaluar)',
+    objetivo: '', resultado: '', observaciones: ''
+  };
+  await PSA.DB.saveProyecto(proyecto, true);
+  const tablero = await PSA.Trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Calendario fase 6' });
+  const listas = PSA.Trabajo.getListas(tablero);
+  const hoy = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Vence hoy', inicio: fecha(0), vencimiento: fecha(0)
+  });
+  const pronto = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Vence en dos días', vencimiento: fecha(2)
+  });
+  const atrasada = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Ya venció', vencimiento: fecha(-1)
+  });
+  await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Vencida y completada', vencimiento: fecha(-1), completada: 1
+  });
+  const sinFecha = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Sin fechas'
+  });
+  PSA.renderTodo();
+
+  PSA.cambiarTab('v-calendario', 'v-calendario');
+  check(document.querySelectorAll('#calendario-contenido .calendar-open-card').length >= 3 &&
+    !document.querySelector('#calendario-contenido .calendar-open-card[data-card-id="' + sinFecha + '"]'),
+  'La vista mensual incluye tareas fechadas y excluye las que no tienen fecha');
+  check(document.querySelector('#calendario-contenido').textContent.includes('Inicio y vencimiento'),
+    'Una tarjeta con inicio y vencimiento en el mismo día se muestra una sola vez');
+  check(document.querySelector('#calendario-contenido').textContent.includes('Ya venció') &&
+    document.querySelector('#calendario-contenido').textContent.includes('Vence pronto'),
+  'El calendario distingue tareas atrasadas y vencimientos próximos');
+
+  const periodoMes = document.querySelector('#calendario-periodo').textContent;
+  document.querySelector('#calendario-anterior').click();
+  check(document.querySelector('#calendario-periodo').textContent !== periodoMes, 'Navegar al período calendario anterior');
+  document.querySelector('#calendario-siguiente').click();
+  check(document.querySelector('#calendario-periodo').textContent === periodoMes, 'Navegar al período calendario siguiente');
+  document.querySelector('#calendario-vista').value = 'semana';
+  document.querySelector('#calendario-vista').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#calendario-contenido .calendar-day').length === 7, 'La vista semanal presenta siete días');
+  document.querySelector('#calendario-vista').value = 'agenda';
+  document.querySelector('#calendario-vista').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelector('#calendario-contenido').textContent.includes('Vence hoy'), 'La agenda agrupa tareas por fecha');
+  document.querySelector('#calendario-hoy').click();
+
+  document.querySelector('#calendario-vista').value = 'mes';
+  document.querySelector('#calendario-vista').dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('.calendar-open-card[data-card-id="' + hoy + '"]').click();
+  check(document.querySelector('#trabajo-dialog').open &&
+    document.querySelector('#trabajo-form [name="titulo"]').value === 'Vence hoy',
+  'Seleccionar una tarea del calendario abre el editor existente');
+  document.querySelector('#trabajo-dialog-cancelar').click();
+  document.querySelector('.calendar-history[data-card-id="' + hoy + '"]').click();
+  check(document.querySelector('#v-actividad').classList.contains('active') &&
+    document.querySelector('#actividad-lista').textContent.includes('Vence hoy'),
+  'El calendario abre el historial asociado a la tarjeta');
+
+  PSA.Tableros.abrirProyecto(proyecto.id);
+  document.querySelector('[data-accion="abrir"][data-id="' + tablero + '"]').click();
+  const periodo = document.querySelector('#filtro-tarjetas-plazo');
+  periodo.value = 'vencidas';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 1 &&
+    document.querySelector('#tablero-columnas .work-card').dataset.cardId === atrasada,
+  'El filtro temporal de vencidas excluye las tareas completadas y sin fecha');
+  periodo.value = 'proximos7';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 2,
+    'El filtro de próximos siete días incluye hoy y el vencimiento próximo');
+  periodo.value = 'hoy';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 1 &&
+    document.querySelector('#tablero-columnas .work-card').dataset.cardId === hoy,
+  'El filtro de vencimientos de hoy identifica la fecha local actual');
+  periodo.value = 'con';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 4,
+    'El filtro con vencimiento incluye fechas pasadas, presentes y futuras');
+  periodo.value = 'intervalo';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('#filtro-fechas-desde').value = fecha(0);
+  document.querySelector('#filtro-fechas-desde').dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('#filtro-fechas-hasta').value = fecha(2);
+  document.querySelector('#filtro-fechas-hasta').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 2,
+    'El filtro de intervalo incluye ambos límites y descarta tareas fuera del rango');
+  document.querySelector('#filtro-fechas-desde').value = fecha(2);
+  document.querySelector('#filtro-fechas-desde').dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('#filtro-fechas-hasta').value = fecha(0);
+  document.querySelector('#filtro-fechas-hasta').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 0 &&
+    document.querySelector('#tablero-filtros-estado').textContent.includes('posterior'),
+  'El intervalo con límites invertidos informa el error sin alterar tarjetas');
+  periodo.value = 'sin';
+  periodo.dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 1 &&
+    document.querySelector('#tablero-columnas .work-card').dataset.cardId === sinFecha,
+  'El filtro temporal identifica tarjetas sin vencimiento');
+  document.querySelector('#filtro-tarjetas-texto').value = 'Vence';
+  document.querySelector('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  check(document.querySelectorAll('#tablero-columnas .work-card').length === 0,
+    'La búsqueda se combina con filtros temporales');
+  const ordenAntes = JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion]));
+  check(!document.querySelector('.work-drag-handle') &&
+    JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion])) === ordenAntes,
+  'Los filtros temporales deshabilitan arrastre y no modifican el orden persistido');
+  document.querySelector('[data-accion="limpiar-filtros-tarjetas"]').click();
+
+  PSA.Actividad.mostrarTablero(tablero);
+  check(document.querySelector('#actividad-lista').textContent.includes('Vence en dos días') &&
+    document.querySelector('#actividad-lista').textContent.includes('Se creó la tarjeta'),
+  'El historial del tablero contiene eventos persistidos con título y descripción');
+  const noOpCount = PSA.Trabajo.getActividad({ tarjetaId: hoy }).length;
+  const fila = PSA.Trabajo.getTarjetas().find(t => t.id === hoy);
+  await PSA.Trabajo.guardarTarjeta({
+    id: fila.id, lista_id: fila.lista_id, titulo: fila.titulo, descripcion: fila.descripcion,
+    inicio: fila.inicio, vencimiento: fila.vencimiento, prioridad: fila.prioridad,
+    observaciones: fila.observaciones, completada: fila.completada,
+    responsables: fila.responsables.map(r => r.id), etiquetas: fila.etiquetas.map(e => e.id)
+  });
+  check(PSA.Trabajo.getActividad({ tarjetaId: hoy }).length === noOpCount,
+    'Guardar valores idénticos no agrega eventos al historial');
+  await PSA.Trabajo.guardarTarjeta({
+    id: pronto, lista_id: listas[0].id, titulo: 'Fecha modificada', vencimiento: fecha(3)
+  });
+  PSA.Calendario.render();
+  check(document.querySelector('#calendario-contenido').textContent.includes('Fecha modificada'),
+    'El calendario refleja la tarjeta confirmada tras editar su fecha');
+  check(PSA.Trabajo.getActividad({ tarjetaId: pronto }).some(e => e.tipo === 'vencimiento_cambiado'),
+    'El cambio de vencimiento queda registrado en el historial de tarjeta');
+  await PSA.DB.transaccion(tx => {
+    for (let indice = 0; indice < 205; indice++) {
+      tx.run(`INSERT INTO actividad (tablero_id,tarjeta_id,tarjeta_titulo,tipo,detalle)
+        VALUES (?,?,?,?,?)`, [tablero, hoy, 'Vence hoy', 'prueba', 'Evento de paginación ' + indice]);
+    }
+  });
+  PSA.Actividad.mostrarTablero(tablero);
+  check(document.querySelectorAll('#actividad-lista > li').length === 100 &&
+    !document.querySelector('#actividad-mas').classList.contains('hidden'),
+  'El historial carga solo la primera página de cien eventos');
+  document.querySelector('#actividad-mas').click();
+  check(document.querySelectorAll('#actividad-lista > li').length === 200,
+    'El control incremental carga la página siguiente sin cargar todo el historial');
+
+  return { resultados };
+};

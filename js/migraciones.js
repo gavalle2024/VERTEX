@@ -1,7 +1,7 @@
 'use strict';
 
 (function () {
-  const VERSION = 2;
+  const VERSION = 3;
   const CAMPOS_LEGACY = [
     'id', 'nombre', 'responsable', 'division', 'inicio', 'meta', 'fin', 'estado',
     'avance', 'implementacion', 'cumplimiento', 'objetivo', 'resultado', 'observaciones',
@@ -110,6 +110,12 @@
     CREATE INDEX idx_tarjeta_responsables_responsable
       ON tarjeta_responsables(responsable_id,tarjeta_id);
   `;
+  const MIGRACION_3 = `
+    ALTER TABLE actividad ADD COLUMN tarjeta_titulo TEXT NOT NULL DEFAULT '';
+    UPDATE actividad SET tarjeta_titulo=coalesce(
+      (SELECT titulo FROM tarjetas WHERE tarjetas.id=actividad.tarjeta_id),'')
+      WHERE tarjeta_id IS NOT NULL;
+  `;
   const COLUMNAS_V1 = {
     proyectos: [...CAMPOS_LEGACY, 'descripcion', 'prioridad', 'archivado', 'responsable_id'],
     responsables: ['id', 'nombre', 'archivado', 'created_at', 'updated_at'],
@@ -121,10 +127,14 @@
     tarjeta_etiquetas: ['tarjeta_id', 'etiqueta_id'],
     actividad: ['id', 'proyecto_id', 'tablero_id', 'tarjeta_id', 'tipo', 'detalle', 'actor', 'created_at']
   };
-  const COLUMNAS = {
+  const COLUMNAS_V2 = {
     ...COLUMNAS_V1,
     etiquetas: [...COLUMNAS_V1.etiquetas, 'archivado'],
     tarjeta_responsables: ['tarjeta_id', 'responsable_id', 'created_at']
+  };
+  const COLUMNAS = {
+    ...COLUMNAS_V2,
+    actividad: [...COLUMNAS_V1.actividad, 'tarjeta_titulo']
   };
   const INDICES_V1 = [
     'idx_proyectos_responsable', 'idx_tableros_proyecto', 'idx_listas_tablero',
@@ -140,10 +150,11 @@
     tarjeta_etiquetas: { tarjeta_id: 'tarjetas', etiqueta_id: 'etiquetas' },
     actividad: { proyecto_id: 'proyectos', tablero_id: 'tableros', tarjeta_id: 'tarjetas' }
   };
-  const RELACIONES = {
+  const RELACIONES_V2 = {
     ...RELACIONES_V1,
     tarjeta_responsables: { tarjeta_id: 'tarjetas', responsable_id: 'responsables' }
   };
+  const RELACIONES = RELACIONES_V2;
 
   function version(db) {
     return db.exec('PRAGMA user_version')[0].values[0][0];
@@ -202,6 +213,10 @@
     _validarVersion(db, 1, COLUMNAS_V1, INDICES_V1, RELACIONES_V1);
   }
 
+  function validarV2(db) {
+    _validarVersion(db, 2, COLUMNAS_V2, INDICES, RELACIONES_V2);
+  }
+
   function validar(db) {
     _validarVersion(db, VERSION, COLUMNAS, INDICES, RELACIONES);
   }
@@ -223,6 +238,10 @@
       validarV1(db);
       return true;
     }
+    if (actual === 2) {
+      validarV2(db);
+      return true;
+    }
     validar(db);
     return false;
   }
@@ -232,6 +251,7 @@
     const actual = version(db);
     if (actual === 0) validarLegacy(db);
     else if (actual === 1) validarV1(db);
+    else if (actual === 2) validarV2(db);
     else throw new Error('No existe una migración para esta versión.');
     const original = actual === 0 ? db.exec(`SELECT ${CAMPOS_LEGACY.join(',')} FROM proyectos ORDER BY id`) : null;
     db.run('BEGIN IMMEDIATE');
@@ -245,8 +265,13 @@
           throw new Error('La migración alteró datos históricos.');
         }
       }
-      db.run(MIGRACION_2);
-      db.run('PRAGMA user_version=2');
+      if (actual < 2) {
+        db.run(MIGRACION_2);
+        db.run('PRAGMA user_version=2');
+        validarV2(db);
+      }
+      db.run(MIGRACION_3);
+      db.run('PRAGMA user_version=3');
       validar(db);
       db.run('COMMIT');
     } catch (e) {
@@ -256,5 +281,5 @@
   }
 
   window.PSA = window.PSA || {};
-  window.PSA.Esquema = { VERSION, preparar, migrar, validar, validarV1 };
+  window.PSA.Esquema = { VERSION, preparar, migrar, validar, validarV1, validarV2 };
 })();

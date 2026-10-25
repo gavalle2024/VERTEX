@@ -389,7 +389,7 @@ test('migración con consentimiento, respaldo exacto, campos históricos intacto
   const migrada = new SQL.Database(destino.file.datos);
   const columnas = valores[0].columns.join(',');
   assert.deepEqual(migrada.exec(`SELECT ${columnas} FROM proyectos`), valores);
-  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 2);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 3);
   assert.equal(migrada.exec('SELECT count(*) FROM responsables')[0].values[0][0], 0);
   assert.equal(migrada.exec('SELECT count(*) FROM actividad')[0].values[0][0], 0);
   assert.equal(migrada.exec('SELECT prioridad,archivado,responsable_id,descripcion FROM proyectos')[0].values[0][0], 'Media');
@@ -632,6 +632,7 @@ test('fase 5: migración v1→v2 conserva responsables y asignaciones histórica
   v1.run('DROP INDEX idx_tarjeta_responsables_responsable');
   v1.run('DROP TABLE tarjeta_responsables');
   v1.run('ALTER TABLE etiquetas DROP COLUMN archivado');
+  v1.run('ALTER TABLE actividad DROP COLUMN tarjeta_titulo');
   v1.run('PRAGMA user_version=1');
   const bytes = v1.export();
   v1.close();
@@ -656,7 +657,7 @@ test('fase 5: migración v1→v2 conserva responsables y asignaciones histórica
   assert.equal(Buffer.compare(Buffer.from(destino.respaldos.get(resultado.respaldo).datos),
     Buffer.from(bytes)), 0);
   const migrada = new SQL.Database(destino.file.datos);
-  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 2);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 3);
   assert.deepEqual(Array.from(migrada.exec('SELECT tarjeta_id,responsable_id FROM tarjeta_responsables')[0].values[0]),
     [tarjeta, responsable]);
   migrada.close();
@@ -666,6 +667,104 @@ test('fase 5: migración v1→v2 conserva responsables y asignaciones histórica
   await nuevo.db.init();
   assert.equal(nuevo.trabajo.getTarjetas().find(fila => fila.id === tarjeta).titulo, 'Tarjeta v1');
   assert.equal(nuevo.trabajo.getTarjetaEtiquetas(tarjeta).length, 1);
+});
+
+test('fase 6: fechas de calendario e historial detallado solo registran cambios efectivos', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Seguimiento temporal' });
+  const listas = app.trabajo.getListas(tablero);
+  const responsable = await app.trabajo.guardarResponsable({ nombre: 'Ana' });
+  const etiqueta = await app.trabajo.guardarEtiqueta({ nombre: 'Planificación', color: '#123456' });
+  const tarjeta = await app.trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Plan anual', descripcion: 'Primera descripción',
+    inicio: '2026-10-25', vencimiento: '2026-11-01', prioridad: 'Media',
+    responsables: [responsable], etiquetas: [etiqueta]
+  });
+  const creada = app.trabajo.getActividad({ tarjetaId: tarjeta });
+  assert.ok(creada.some(evento => evento.tipo === 'tarjeta_creada' && evento.tarjeta_titulo === 'Plan anual'));
+  assert.ok(creada.some(evento => evento.tipo === 'responsable_asignado'));
+  assert.ok(creada.some(evento => evento.tipo === 'etiqueta_agregada'));
+
+  const antesSinCambios = creada.length;
+  await app.trabajo.guardarTarjeta({
+    id: tarjeta, lista_id: listas[0].id, titulo: 'Plan anual', descripcion: 'Primera descripción',
+    inicio: '2026-10-25', vencimiento: '2026-11-01', prioridad: 'Media',
+    responsables: [responsable], etiquetas: [etiqueta]
+  });
+  assert.equal(app.trabajo.getActividad({ tarjetaId: tarjeta }).length, antesSinCambios);
+
+  await app.trabajo.guardarTarjeta({
+    id: tarjeta, lista_id: listas[0].id, titulo: 'Plan anual actualizado',
+    descripcion: 'Descripción actualizada', inicio: '', vencimiento: '2026-11-02',
+    prioridad: 'Alta', responsables: [], etiquetas: []
+  });
+  const actividad = app.trabajo.getActividad({ tarjetaId: tarjeta });
+  assert.ok(actividad.some(evento => evento.tipo === 'titulo_cambiado' && evento.tarjeta_titulo === 'Plan anual actualizado'));
+  assert.ok(actividad.some(evento => evento.tipo === 'descripcion_cambiada'));
+  assert.ok(actividad.some(evento => evento.tipo === 'prioridad_cambiada'));
+  assert.ok(actividad.some(evento => evento.tipo === 'inicio_cambiado'));
+  assert.ok(actividad.some(evento => evento.tipo === 'vencimiento_cambiado'));
+  assert.ok(actividad.some(evento => evento.tipo === 'responsable_retirado'));
+  assert.ok(actividad.some(evento => evento.tipo === 'etiqueta_retirada'));
+  assert.equal(app.trabajo.getTarjetas().find(fila => fila.id === tarjeta).inicio, '');
+  await app.trabajo.moverTarjeta(tarjeta, listas[1].id, 0);
+  const movida = app.trabajo.getTarjetas().find(fila => fila.id === tarjeta);
+  assert.equal(movida.inicio, '');
+  assert.equal(movida.vencimiento, '2026-11-02');
+  assert.equal(movida.prioridad, 'Alta');
+  assert.ok(app.trabajo.getActividad({ tableroId: tablero }).some(evento => evento.tipo === 'tarjeta_movida'));
+  const segunda = await app.trabajo.guardarTarjeta({ lista_id: listas[1].id, titulo: 'Para reordenar' });
+  await app.trabajo.moverTarjeta(segunda, listas[1].id, 0);
+  assert.ok(app.trabajo.getActividad({ tarjetaId: segunda }).some(evento => evento.tipo === 'tarjeta_reordenada'));
+  const eventosAntesNoOp = app.trabajo.getActividad({ tarjetaId: segunda }).length;
+  await app.trabajo.moverTarjeta(segunda, listas[1].id, 0);
+  assert.equal(app.trabajo.getActividad({ tarjetaId: segunda }).length, eventosAntesNoOp);
+  assert.equal(app.trabajo.getActividad({ tarjetaId: tarjeta, limite: 2 }).length, 2);
+  const pagina = app.trabajo.getActividad({ tableroId: tablero, limite: 2 });
+  const anterior = app.trabajo.getActividad({ tableroId: tablero, limite: 2, antesId: pagina[1].id });
+  assert.ok(anterior.every(evento => evento.id < pagina[1].id));
+  assert.throws(() => app.trabajo.getActividad({ limite: 0 }), /límite/);
+
+  const reopen = entorno(app.store.get('vertex_db'));
+  await reopen.db.init();
+  assert.ok(reopen.trabajo.getActividad({ tarjetaId: tarjeta })
+    .some(evento => evento.tipo === 'titulo_cambiado' && evento.tarjeta_titulo === 'Plan anual actualizado'));
+  assert.equal(reopen.trabajo.getTarjetas().find(fila => fila.id === tarjeta).vencimiento, '2026-11-02');
+});
+
+test('fase 6: migración v2→v3 captura títulos históricos y revierte ante fallo', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Historial legado' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const tarjeta = await app.trabajo.guardarTarjeta({ lista_id: lista, titulo: 'Título anterior' });
+  const v2 = new SQL.Database(app.db.exportarDB());
+  v2.run('ALTER TABLE actividad DROP COLUMN tarjeta_titulo');
+  v2.run('PRAGMA user_version=2');
+  const bytes = v2.export();
+  v2.close();
+
+  const rollback = new SQL.Database(bytes);
+  rollback.run('PRAGMA foreign_keys=ON');
+  const ejecutarOriginal = rollback.run.bind(rollback);
+  rollback.run = (sql, params) => {
+    if (sql === 'PRAGMA user_version=3') throw new Error('Fallo de migración v3 simulado');
+    return ejecutarOriginal(sql, params);
+  };
+  assert.throws(() => app.esquema.migrar(rollback), /Fallo de migración v3/);
+  assert.equal(rollback.exec('PRAGMA user_version')[0].values[0][0], 2);
+  assert.equal(rollback.exec('PRAGMA table_info(actividad)')[0].values.some(row => row[1] === 'tarjeta_titulo'), false);
+  rollback.close();
+
+  const destino = await solicitarMigracion(app, bytes);
+  const resultado = await app.db.migrarConexion();
+  assert.equal(resultado.ok, true);
+  const migrada = new SQL.Database(destino.file.datos);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 3);
+  assert.equal(migrada.exec('SELECT tarjeta_titulo FROM actividad WHERE tarjeta_id=?', [tarjeta])[0].values[0][0],
+    'Título anterior');
+  migrada.close();
 });
 
 test('FK y restricciones se aplican tras clonar/exportar y protegen relaciones', async () => {

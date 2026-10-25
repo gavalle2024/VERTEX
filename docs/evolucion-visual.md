@@ -2,9 +2,9 @@
 
 **Fecha:** 2026-10-24
 
-**Estado:** análisis y diseño aprobados; fase 2 implementada.
+**Estado:** fases 2 a 6 implementadas; la matriz de brechas mantiene el registro histórico de la línea base.
 
-**Alcance:** la matriz registra la línea base 2.4.0 previa a los cambios. La infraestructura entregada se detalla en [migraciones.md](migraciones.md); las pantallas de gestión visual siguen pendientes.
+**Alcance:** la matriz registra la línea base 2.4.0 previa a los cambios. La infraestructura y el estado actual se detallan en [migraciones.md](migraciones.md); las funciones implementadas de calendario e historial ya están disponibles en la app.
 
 ## 1. Evidencia y línea base
 
@@ -176,7 +176,8 @@ No agregar pestañas futuras ni controles sin comportamiento. Ampliar `PSA.rende
 - El pedido vigente conserva el formulario histórico de proyectos: sus campos aditivos y eventos de creación/edición no se incorporaron en esta fase ni se declaran terminados. La actividad de tableros, listas y tarjetas sí queda registrada transaccionalmente por las APIs existentes.
 - Fase 4: implementada para tableros Kanban; controles individuales y múltiples, arrastre individual entre/dentro de etapas, inserción por posición, feedback de destino y alternativa de teclado. El movimiento persiste con la API existente y rollback ante error; la selección múltiple no se arrastra en conjunto. Arrastre táctil no implementado ni verificado. Ver [cambios](cambios.md).
 - Fase 5: implementada en el alcance confirmado: catálogo local de responsables/etiquetas, asignaciones múltiples, prioridades, búsqueda/filtros, política segura para selección oculta y desactivación lógica. No agrega Mis tareas ni identidad de usuario.
-- Fases 6 a 8: pendientes total o parcialmente: calendario, historial visual, Mis tareas, dashboard ampliado y validación táctil/manualmente con dispositivo de destino.
-- El esquema vigente es versión 2. La migración 1 → 2 es aditiva: crea la tabla M:N de responsables y agrega estado lógico para etiquetas; respalda y requiere consentimiento. Crítica se presenta usando el valor de SQLite histórico `Urgente` para evitar reconstruir tarjetas o cambiar la restricción.
-- Las pruebas sintéticas de fase 5 abarcan migración, persistencia, asignaciones, catálogos, búsqueda/filtros y regresión de orden. Los resultados ejecutados quedan en [cambios](cambios.md); no se alteró la base habitual.
+- Fase 6: implementada: vistas mensual, semanal y agenda con navegación local por fecha; filtros temporales combinables; historial reciente, por tablero y por tarjeta, con paginación y contexto histórico de título. Los eventos específicos de tarjeta se guardan dentro de la transacción, solo si cambió el dato y después de una escritura confirmada.
+- Fases 7 y 8: pendientes total o parcialmente: Mis tareas, historial visual ampliado para los campos del proyecto, dashboard ampliado y validación táctil/manualmente con dispositivo de destino.
+- El esquema vigente es versión 3. La migración 2 → 3 agrega el título snapshot en `actividad` y rellena los títulos de eventos existentes a partir de sus tarjetas, dentro de la migración con respaldo y consentimiento. Crítica se presenta usando el valor de SQLite histórico `Urgente` para evitar reconstruir tarjetas o cambiar la restricción.
+- Las pruebas sintéticas de fase 6 abarcan migraciones, rollback, persistencia de fechas, trazabilidad, navegación/calendario, filtros temporales y regresión de fases anteriores. Los resultados ejecutados quedan en [cambios](cambios.md); la base habitual no se usó para migrar ni probar escrituras.
 - No se migró ni modificó la base de uso habitual durante el desarrollo. No se instalaron dependencias ni se crearon commits ni operaciones remotas.

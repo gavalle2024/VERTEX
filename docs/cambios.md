@@ -6,6 +6,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-10-24
 
+### Calendario e historial de actividad (fase 6) — 2026-10-25
+- Se agregaron vistas mensual, semanal y agenda basadas en `tarjetas.inicio` y `tarjetas.vencimiento`, con navegación por período y acción Hoy. Las tarjetas aparecen en las fechas definidas; una fecha de calendario se mantiene como texto `AAAA-MM-DD`, sin conversión UTC. El calendario abre el editor ya existente y tiene acceso al historial de cada tarjeta.
+- Los indicadores del Kanban distinguen sin vencimiento, vencimiento cumplido, vencimiento próximo y vencido, con texto además del color. Próximo se define como vencimiento desde hoy hasta seis días después (siete fechas inclusivas); vencida es fecha anterior a hoy en tarjeta no completada.
+- Se agregaron filtros temporales combinables en el tablero: con/sin vencimiento, vencidas, hoy, próximos siete días e intervalo inclusivo desde/hasta. Siguen respetando la política de fase 5: filtros activos bloquean arrastre y reordenamiento parcial, sin cambiar posiciones ni orden.
+- La API de `actividad` registra cambios efectivos de tarjetas —creación, título, descripción, prioridad, fechas, asignaciones, etapa, reordenamiento, observaciones y completitud— dentro de la transacción que persiste la tarjeta. Eventos incluyen el título snapshot, detalle y actor neutral `Instalación local`; guardar valores iguales o repetir una posición sin cambios no genera eventos. Errores de escritura revierten tanto cambio como evento.
+- Se agregó la consulta por tarjeta/tablero y actividad reciente con límite de 100 por página (máximo API 200) y carga incremental. Los textos se renderizan escapados. Las tarjetas se archivan, no se eliminan físicamente, por lo que sus referencias y trazabilidad continúan disponibles.
+- Migración incremental `2 → 3`: añade `actividad.tarjeta_titulo` y rellena los títulos históricos desde la tarjeta vinculada. Se mantiene la migración completa `0 → 1 → 2 → 3`, con consentimiento, respaldo y rollback. No se migró la base habitual.
+- Node: `node --test --test-reporter=spec tests\db.test.cjs`: **37 aprobadas, 0 fallidas**. Se validaron fechas, eventos detallados y no-op, consulta acotada/paginada, persistencia y migraciones/rollback con archivos sintéticos.
+- Navegador aislado en Chromium: fase 6 **24 comprobaciones**; regresión de fases 3, movimientos, arrastre y fase 5: **42, 26, 25 y 18** comprobaciones. Layout del calendario a 390, 768 y 1280 px: sin desbordamiento de página ni de grilla.
+- No se instalaron dependencias ni se realizaron commits u operaciones remotas. Mis tareas, historial visual ampliado de proyectos y soporte táctil siguen pendientes.
+
 ### Organización de tarjetas y filtros (fase 5) — 2026-10-25
 - Se extendió el esquema a versión 2 con migración incremental `1 → 2`: nueva tabla `tarjeta_responsables` muchos-a-muchos, clave primaria compuesta, claves foráneas restrictivas e índice de búsqueda por responsable; `etiquetas.archivado` con default seguro. La migración copia las relaciones previas desde `tarjetas.responsable_id` y conserva esa columna y todas las posiciones/datos existentes. El proceso `0 → 1 → 2` también quedó cubierto.
 - Responsables y etiquetas se pueden crear, buscar, renombrar, desactivar y reactivar desde la pestaña Tableros. Se normalizan los espacios y se rechazan duplicados por NFKC/minúsculas; colores deben ser `#RRGGBB`. La desactivación conserva asignaciones y los registros inactivos aparecen en las tarjetas históricas pero no en opciones para asignar de nuevo.
@@ -16,7 +27,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 - `getTarjetas()` presenta arrays de responsables/etiquetas con estado archivado, en dos consultas relacionales por render; las tarjetas muestran distintivos compactos con contraste calculado y estado textual, sin depender solo del color.
 - Pruebas Node: `node --test --test-reporter=spec tests\db.test.cjs`: **35 aprobadas, 0 fallidas**. Se añadieron casos para normalización, duplicados, inactivos, asignaciones M:N, etiquetas/color, prioridad, rollback y migración v1 → v2 con datos sintéticos.
 - Prueba browser `probarFase5Tableros()`: **18 comprobaciones** para catálogos, prioridades, búsqueda/filtros individuales y combinados, orden no modificado y política de selección oculta. Se realizaron en Chromium con SQLite/binario sintético, nunca con la base habitual.
-- La base de uso habitual no fue migrada ni modificada; no se instalaron dependencias, no hubo operaciones remotas ni commits. Mis tareas, calendario, historial visual y arrastre táctil continúan pendientes.
+- La base de uso habitual no fue migrada ni modificada; no se instalaron dependencias, no hubo operaciones remotas ni commits. Mis tareas, historial visual ampliado y arrastre táctil continúan pendientes.
 
 ### Kanban con arrastre y reordenamiento (fase 4) — 2026-10-25
 - El arrastre comienza únicamente en el control dedicado de cada tarjeta; los botones, casillas y selectores internos no inician una operación de arrastre.
