@@ -1,7 +1,7 @@
 'use strict';
 
 (function () {
-  const VERSION = 1;
+  const VERSION = 2;
   const CAMPOS_LEGACY = [
     'id', 'nombre', 'responsable', 'division', 'inicio', 'meta', 'fin', 'estado',
     'avance', 'implementacion', 'cumplimiento', 'objetivo', 'resultado', 'observaciones',
@@ -97,7 +97,20 @@
     CREATE INDEX idx_actividad_tablero ON actividad(tablero_id,id);
     CREATE INDEX idx_actividad_tarjeta ON actividad(tarjeta_id,id);
   `;
-  const COLUMNAS = {
+  const MIGRACION_2 = `
+    ALTER TABLE etiquetas ADD COLUMN archivado INTEGER NOT NULL DEFAULT 0 CHECK(archivado IN (0,1));
+    CREATE TABLE tarjeta_responsables (
+      tarjeta_id TEXT NOT NULL REFERENCES tarjetas(id) ON DELETE RESTRICT,
+      responsable_id TEXT NOT NULL REFERENCES responsables(id) ON DELETE RESTRICT,
+      created_at ${FECHA},
+      PRIMARY KEY(tarjeta_id,responsable_id)
+    );
+    INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id)
+      SELECT id,responsable_id FROM tarjetas WHERE responsable_id IS NOT NULL;
+    CREATE INDEX idx_tarjeta_responsables_responsable
+      ON tarjeta_responsables(responsable_id,tarjeta_id);
+  `;
+  const COLUMNAS_V1 = {
     proyectos: [...CAMPOS_LEGACY, 'descripcion', 'prioridad', 'archivado', 'responsable_id'],
     responsables: ['id', 'nombre', 'archivado', 'created_at', 'updated_at'],
     tableros: ['id', 'proyecto_id', 'nombre', 'descripcion', 'archivado', 'created_at', 'updated_at'],
@@ -108,18 +121,28 @@
     tarjeta_etiquetas: ['tarjeta_id', 'etiqueta_id'],
     actividad: ['id', 'proyecto_id', 'tablero_id', 'tarjeta_id', 'tipo', 'detalle', 'actor', 'created_at']
   };
-  const INDICES = [
+  const COLUMNAS = {
+    ...COLUMNAS_V1,
+    etiquetas: [...COLUMNAS_V1.etiquetas, 'archivado'],
+    tarjeta_responsables: ['tarjeta_id', 'responsable_id', 'created_at']
+  };
+  const INDICES_V1 = [
     'idx_proyectos_responsable', 'idx_tableros_proyecto', 'idx_listas_tablero',
     'idx_tarjetas_lista', 'idx_tarjetas_responsable', 'idx_tarjetas_vencimiento',
     'idx_etiquetas_tarjeta', 'idx_actividad_proyecto', 'idx_actividad_tablero', 'idx_actividad_tarjeta'
   ];
-  const RELACIONES = {
+  const INDICES = [...INDICES_V1, 'idx_tarjeta_responsables_responsable'];
+  const RELACIONES_V1 = {
     proyectos: { responsable_id: 'responsables' },
     tableros: { proyecto_id: 'proyectos' },
     listas: { tablero_id: 'tableros' },
     tarjetas: { lista_id: 'listas', responsable_id: 'responsables' },
     tarjeta_etiquetas: { tarjeta_id: 'tarjetas', etiqueta_id: 'etiquetas' },
     actividad: { proyecto_id: 'proyectos', tablero_id: 'tableros', tarjeta_id: 'tarjetas' }
+  };
+  const RELACIONES = {
+    ...RELACIONES_V1,
+    tarjeta_responsables: { tarjeta_id: 'tarjetas', responsable_id: 'responsables' }
   };
 
   function version(db) {
@@ -155,13 +178,13 @@
     }
   }
 
-  function validar(db) {
+  function _validarVersion(db, versionEsperada, columnasEsperadas, indicesEsperados, relacionesEsperadas) {
     _integridad(db);
-    if (version(db) !== VERSION) throw new Error('Versión de esquema incompatible.');
-    for (const [tabla, columnas] of Object.entries(COLUMNAS)) _columnas(db, tabla, columnas);
+    if (version(db) !== versionEsperada) throw new Error('Versión de esquema incompatible.');
+    for (const [tabla, columnas] of Object.entries(columnasEsperadas)) _columnas(db, tabla, columnas);
     const indices = db.exec("SELECT name FROM sqlite_master WHERE type='index'")[0].values.map(row => row[0]);
-    if (INDICES.some(nombre => !indices.includes(nombre))) throw new Error('Faltan índices del esquema vigente.');
-    for (const [tabla, relaciones] of Object.entries(RELACIONES)) {
+    if (indicesEsperados.some(nombre => !indices.includes(nombre))) throw new Error('Faltan índices del esquema vigente.');
+    for (const [tabla, relaciones] of Object.entries(relacionesEsperadas)) {
       const claves = db.exec(`PRAGMA foreign_key_list(${tabla})`);
       for (const [columna, destino] of Object.entries(relaciones)) {
         if (!claves.length || !claves[0].values.some(row =>
@@ -173,6 +196,14 @@
     if (db.exec('PRAGMA foreign_key_check').length) throw new Error('Hay relaciones inválidas en la base de datos.');
     const fk = db.exec('PRAGMA foreign_keys')[0].values[0][0];
     if (fk !== 1) throw new Error('Las claves foráneas no están habilitadas.');
+  }
+
+  function validarV1(db) {
+    _validarVersion(db, 1, COLUMNAS_V1, INDICES_V1, RELACIONES_V1);
+  }
+
+  function validar(db) {
+    _validarVersion(db, VERSION, COLUMNAS, INDICES, RELACIONES);
   }
 
   function preparar(db, nueva) {
@@ -188,24 +219,35 @@
       validarLegacy(db);
       return true;
     }
+    if (actual === 1) {
+      validarV1(db);
+      return true;
+    }
     validar(db);
     return false;
   }
 
   function migrar(db) {
     if (version(db) === VERSION) { validar(db); return; }
-    if (version(db) !== 0) throw new Error('No existe una migración para esta versión.');
-    validarLegacy(db);
-    const original = db.exec(`SELECT ${CAMPOS_LEGACY.join(',')} FROM proyectos ORDER BY id`);
+    const actual = version(db);
+    if (actual === 0) validarLegacy(db);
+    else if (actual === 1) validarV1(db);
+    else throw new Error('No existe una migración para esta versión.');
+    const original = actual === 0 ? db.exec(`SELECT ${CAMPOS_LEGACY.join(',')} FROM proyectos ORDER BY id`) : null;
     db.run('BEGIN IMMEDIATE');
     try {
-      db.run(MIGRACION_1);
-      db.run('PRAGMA user_version=1');
-      validar(db);
-      const migrados = db.exec(`SELECT ${CAMPOS_LEGACY.join(',')} FROM proyectos ORDER BY id`);
-      if (JSON.stringify(original) !== JSON.stringify(migrados)) {
-        throw new Error('La migración alteró datos históricos.');
+      if (actual === 0) {
+        db.run(MIGRACION_1);
+        db.run('PRAGMA user_version=1');
+        validarV1(db);
+        const migrados = db.exec(`SELECT ${CAMPOS_LEGACY.join(',')} FROM proyectos ORDER BY id`);
+        if (JSON.stringify(original) !== JSON.stringify(migrados)) {
+          throw new Error('La migración alteró datos históricos.');
+        }
       }
+      db.run(MIGRACION_2);
+      db.run('PRAGMA user_version=2');
+      validar(db);
       db.run('COMMIT');
     } catch (e) {
       db.run('ROLLBACK');
@@ -214,5 +256,5 @@
   }
 
   window.PSA = window.PSA || {};
-  window.PSA.Esquema = { VERSION, preparar, migrar, validar };
+  window.PSA.Esquema = { VERSION, preparar, migrar, validar, validarV1 };
 })();

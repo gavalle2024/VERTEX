@@ -1,6 +1,6 @@
 # Arquitectura — Gestión de Proyectos PSA
 
-**Versión de esquema:** 1 (persistencia de fase 2; interfaz funcional de fase 3)
+**Versión de esquema:** 2 (persistencia relacional, Kanban y organización de fase 5)
 
 **Fecha:** 2026-10-24
 
@@ -118,7 +118,10 @@ IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selecc
 
 - Catálogo filtrado por proyecto real, inclusión explícita de archivados, apertura y edición.
 - Columnas por lista, nombres libres y categoría funcional; orden de listas activas con `reordenarListas(tableroId, ids)`. La creación de cinco listas iniciales pertenece a `guardarTablero`, no se duplica en la UI.
-- Tarjetas en su lista, detalle/edición, responsable de catálogo existente, prioridad, fechas, observaciones, completitud y archivo/restauración. Los vencimientos se comparan con el día local; no modifican automáticamente estados del proyecto.
+- Administración local de responsables y etiquetas desde el mismo diálogo de entidades, con búsqueda de catálogo, edición y desactivación/reactivación lógica. No hay autenticación ni cuentas.
+- Tarjetas en su lista, detalle/edición, varios responsables y etiquetas, prioridad, fechas, observaciones, completitud y archivo/restauración. Los vencimientos se comparan con el día local; no modifican automáticamente estados del proyecto.
+- Búsqueda en memoria por título/descripción y filtros centralizados por responsable, etiqueta, prioridad, etapa y asignación. Buscar o filtrar no modifica registros ni orden.
+- Con cualquier filtro activo se deshabilitan el arrastre y los controles de reordenamiento dentro de la etapa, pues los índices parciales no representan la posición persistida. Los movimientos individuales y por lote conservan su API; una selección con tarjetas ocultas requiere activar el control explícito para incluirlas.
 - `guardarTablero`, `guardarLista`, `guardarTarjeta` y `archivar` esperan transacción y escritura confirmadas antes de renderizar/notificar. Los errores se registran y se muestran; un guardado fallido conserva el diálogo y sus datos.
 - `getTableros`, `getListas`, `getTarjetas`, `getResponsables` y `DB.getProyectos` son las únicas fuentes de datos. La UI no ejecuta SQL, no recrea tablas y no usa localStorage.
 - El mismo `<dialog>` nativo cambia sus campos según entidad. Cuenta con etiquetas, título/contexto accesibles, contención de foco, Esc/cancelación con confirmación de descarte y retorno de foco a un elemento existente tras renderizar.
@@ -132,9 +135,9 @@ IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selecc
 - `moverTarjeta` se conserva para el movimiento individual y actualiza solo ese ID en los traslados al final de una etapa; las posiciones de origen y destino no seleccionadas se preservan. `moverTarjetas` valida el lote, tablero único y listas activas antes de mutar, asigna nuevas posiciones únicas contiguas al final de cada destino en orden visual y no cambia las posiciones de tarjetas restantes. Eventos y completitud se escriben dentro de una sola transacción. Un error de validación/escritura no publica cambios parciales. El éxito vuelve a renderizar y limpia selección.
 - Los controles explícitos de movimiento por etapa y posición se mantienen como alternativa al arrastre.
 
-No incluye gestión del catálogo de responsables/etiquetas, filtros de tareas, calendario ni historial visual. La actividad relacional ya se escribe en la transacción de las APIs existentes. El avance de proyectos sigue siendo manual.
+La fase 5 no incluye Mis tareas, calendario ni historial visual. La actividad relacional sigue escribiéndose dentro de las transacciones. El avance de proyectos sigue siendo manual. Las etiquetas se muestran en distintivos flexibles; no se limita la cantidad máxima por tarjeta.
 
-#### Validación de la interfaz de fases 3 y 4
+#### Validación de la interfaz de fases 3, 4 y 5
 
 [tests/tableros.browser.js](../tests/tableros.browser.js) no se incluye en la aplicación. Ejecutarlo **solo en una página de prueba sin base real conectada**; rechaza una conexión activa. Usa SQLite real, archivos en memoria e IndexedDB simulado. No solicita permisos ni escribe archivos de usuario.
 
@@ -161,6 +164,8 @@ Después de la reapertura, `await verificarDisenoTableros()` comprueba nombres d
 `await verificarCambioBaseTableros()` agrega cuatro comprobaciones sobre cancelación, archivo inválido, reinicio de selección al cambiar y recuperación sin mezcla al volver a la base sintética original. El script completo suma 67 comprobaciones aprobadas, además de las tres verificaciones de teclado.
 
 La corrección de movimiento se valida con `await probarMovimientoTarjetas()`: 26 comprobaciones de UI para límites, movimiento individual y a destino específico, seleccionar/deseleccionar, selección por etapa, movimiento relativo en ambas direcciones, orden/posiciones relativas, tarjetas que permanecen, falta de selección y error/reintento atómico. Devuelve el binario aislado y las ubicaciones/posiciones esperadas; tras recargar y cargar el helper, `await prepararPruebaTableros(resultado.archivo)` y `verificarReaperturaMovimiento(resultado)` comprueba que los movimientos y el orden persisten.
+
+La fase 5 se valida con `await probarFase5Tableros()`: administración local de responsables/etiquetas, asignaciones múltiples, prioridad crítica, búsqueda por título/descripción y mayúsculas, filtros individuales/combinados, estado sin resultados, posiciones persistidas, arrastre deshabilitado con filtros y selección oculta con confirmación explícita. Devuelve los IDs del tablero, catálogo y etiquetas; se ejecutó en navegador aislado con base sintética.
 
 El DnD se valida con `await probarArrastreTarjetas()`: comprueba el control de inicio, inserción intermedia, reordenamiento dentro de lista, extremos, rechazo intertablero, cancelación, alcance individual con selección múltiple, error/reintento de escritura, orden/posiciones y alternativa de teclado. Devuelve `{archivo, ubicaciones, ordenListas, tableroId, proyectoId}`; tras recargar, `await prepararPruebaTableros(resultado.archivo)` y `verificarReaperturaArrastre(resultado)` comprueban la persistencia. La suite envía eventos `DragEvent` en Chromium con una base sintética; no simula interacción física ni táctil.
 
@@ -196,7 +201,7 @@ El DDL canónico está en [migraciones.js](../js/migraciones.js). La tabla `proy
 - `objetivo`, `resultado`, `observaciones`: TEXT.
 - `created_at`, `updated_at`: fechas de creación y última modificación.
 
-El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de responsable a proyectos. Incorpora responsables, tableros, listas, tarjetas, etiquetas, tarjeta_etiquetas y actividad, con índices, CHECK y claves foráneas restrictivas. Los valores se envían mediante parámetros SQL; los identificadores provienen de constantes internas. No se crean vistas SQL. El formulario histórico todavía no expone los nuevos campos.
+El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de responsable a proyectos. El esquema 2 agrega `tarjeta_responsables` (relación M:N) y el indicador `etiquetas.archivado`; la migración copia los vínculos existentes de `tarjetas.responsable_id` sin quitar esa columna histórica. Los responsables y etiquetas se desactivan de forma lógica para preservar asignaciones anteriores. Las tarjetas mantienen prioridad SQLite histórica `Urgente` como valor interno compatible, que la interfaz presenta como **Crítica**; la prioridad predeterminada sigue siendo `Media`. Los valores se envían mediante parámetros SQL; los identificadores provienen de constantes internas. No se crean vistas SQL. El formulario histórico de proyectos permanece sin cambios.
 
 ## Decisiones y límites
 
@@ -212,7 +217,7 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 
 ## Verificación
 
-[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto.
+[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 5 aprobó **35 pruebas**.
 
 ```powershell
 node --test tests\db.test.cjs
@@ -222,4 +227,4 @@ Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaci
 
 ## Evolución propuesta
 
-El [análisis de evolución visual](evolucion-visual.md) contiene la matriz de brechas sobre la línea base (`user_version=0`) y el modelo relacional aprobado. La fase 2 entrega infraestructura y flujo de migración; las fases de pantallas visuales permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
+El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 5 implementadas, con esquema vigente 2. Mis tareas, calendario e historial visual permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).

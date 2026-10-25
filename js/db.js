@@ -102,8 +102,9 @@
   function _crearDB(data) {
     const candidata = data.length ? new _SQL.Database(data) : new _SQL.Database();
     try {
+      const versionOriginal = candidata.exec('PRAGMA user_version')[0].values[0][0];
       const requiereMigracion = window.PSA.Esquema.preparar(candidata, !data.length);
-      return { candidata, requiereMigracion };
+      return { candidata, requiereMigracion, versionOriginal };
     } catch (e) {
       candidata.close();
       throw new Error('Archivo SQLite inválido o esquema incompatible. No se modificó el archivo. ' + e.message);
@@ -113,10 +114,10 @@
   async function _activar(conexion) {
     const file = await conexion.archivo.getFile();
     const datos = new Uint8Array(await file.arrayBuffer());
-    const { candidata, requiereMigracion } = _crearDB(datos);
+    const { candidata, requiereMigracion, versionOriginal } = _crearDB(datos);
     if (requiereMigracion) {
       candidata.close();
-      _migracion = { conexion, original: datos };
+      _migracion = { conexion, original: datos, versionOriginal };
       return false;
     }
     try {
@@ -249,9 +250,11 @@
   }
 
   async function _respaldar(solicitud, destino) {
+    const versionDestino = Math.max(1, solicitud.versionOriginal + 1);
     if (!destino) {
       const carpeta = solicitud.conexion.carpeta;
-      const nombre = 'vertex.pre-v1.' + Date.now() + '.' + Math.random().toString(36).slice(2, 10) + '.db';
+      const nombre = 'vertex.pre-v' + versionDestino + '.' + Date.now() + '.' +
+        Math.random().toString(36).slice(2, 10) + '.db';
       try {
         await carpeta.getFileHandle(nombre);
         throw new Error('El nombre de respaldo ya existe. Reintente para generar otro nombre.');
@@ -281,7 +284,7 @@
       const solicitud = _migracion;
       // El selector alternativo se invoca antes de cualquier await para conservar el gesto del usuario.
       const destino = solicitud.conexion.carpeta ? null : await window.showSaveFilePicker({
-        suggestedName: 'vertex.pre-v1.' + Date.now() + '.db',
+        suggestedName: 'vertex.pre-v' + Math.max(1, solicitud.versionOriginal + 1) + '.' + Date.now() + '.db',
         types: [{ description: 'Respaldo SQLite anterior a la migración', accept: { 'application/octet-stream': ['.db'] } }]
       });
       candidata = new _SQL.Database(solicitud.original);

@@ -501,6 +501,31 @@ tr:hover td { background: #f7f9fc; }
 .work-card h4 button { text-align: left; width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .work-priority-high { border-left-color: var(--danger); }
 .work-complete { border-left-color: var(--green); }
+.work-badges { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
+.work-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.work-badge-priority { font-weight: 700; }
+.work-badge-inactive { opacity: .7; }
+.catalog-admin { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.catalog-admin section { min-width: 0; }
+.catalog-admin h3 { margin: 0; color: var(--navy); }
+.catalog-items { display: grid; gap: 8px; margin-top: 10px; }
+.catalog-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-width: 0; }
+.catalog-item > span { overflow-wrap: anywhere; }
+.catalog-color { width: 14px; height: 14px; display: inline-block; border: 1px solid var(--border); border-radius: 50%; vertical-align: middle; }
+#tablero-filtros-estado { min-height: 1em; }
+#tablero-incluir-seleccion-oculta:disabled { opacity: .5; }
 .work-meta { font-size: 12px; color: var(--muted); }
 .work-overdue, .form-error { color: var(--danger); font-weight: 600; }
 .preserve-text { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -529,6 +554,9 @@ tr:hover td { background: #f7f9fc; }
 @media (max-width: 600px) {
   #trabajo-dialog .grid { grid-template-columns: 1fr; }
   #trabajo-dialog { padding: 16px; }
+}
+@media (max-width: 700px) {
+  .catalog-admin { grid-template-columns: 1fr; }
 }
 
 /* ── IMPRESIÓN ── */

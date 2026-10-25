@@ -2,7 +2,7 @@
 
 Aplicación web para registrar, seguir y analizar proyectos de implementación de la **Policía de Seguridad Aeroportuaria**, sin backend ni instalación de paquetes.
 
-**Evolución visual en curso:** disponibles la persistencia relacional, la interfaz de tableros/listas/tarjetas, el movimiento individual o múltiple y el arrastre/reordenamiento de una tarjeta. El calendario, Mis tareas e historial visual siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
+**Evolución visual en curso:** disponibles la persistencia relacional, la interfaz de tableros/listas/tarjetas, el movimiento individual o múltiple, el arrastre/reordenamiento de una tarjeta y las funciones de la fase 5 (responsables, etiquetas, prioridades, búsqueda y filtros). El calendario, Mis tareas e historial visual siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
 
 ## Qué permite hacer
 
@@ -17,10 +17,13 @@ Aplicación web para registrar, seguir y analizar proyectos de implementación d
 - Seleccionar y recordar la carpeta de la base de datos desde la interfaz, y cambiarla posteriormente.
 - Crear tableros vinculados a proyectos reales; consultar, editar, archivar y restaurar sus datos.
 - Organizar listas personalizables como columnas; crearlas, renombrarlas, ordenar con **Ordenar lista antes/después**, archivar y restaurar.
-- Crear, consultar y editar tarjetas con descripción, prioridad, fechas, observaciones, responsable del catálogo existente y marca de completada; archivar y restaurar.
+- Administrar responsables locales (crear, buscar, renombrar, desactivar y reactivar) y asignar varios a una tarjeta; la desactivación conserva el historial.
+- Administrar etiquetas personalizadas con color, búsqueda y activación/desactivación; asignar varias etiquetas a una tarjeta.
+- Crear, consultar y editar tarjetas con descripción, prioridad (Crítica, Alta, Media o Baja), fechas, observaciones y marca de completada; archivar y restaurar.
+- Buscar tarjetas por título o descripción y combinar filtros de responsable, etiqueta, prioridad, etapa y asignación. Limpiar filtros sin alterar datos ni orden.
 - Mover una tarjeta a la etapa anterior/siguiente o a una etapa específica. Seleccionar varias tarjetas individualmente o todas las de una etapa, moverlas de forma atómica y cancelar la selección.
 - Arrastrar una tarjeta desde su control dedicado para insertarla antes/después de otra o al final de una etapa, incluso dentro de su etapa actual. Los botones **Subir/Bajar en la etapa** ofrecen la alternativa por teclado; las acciones de selección múltiple siguen siendo explícitas y separadas.
-- Consultar el Kanban básico con indicadores de prioridad, vencimiento y completitud, estados vacíos y errores explícitos.
+- Consultar el Kanban con responsables, distintivos de etiquetas, indicadores de prioridad, vencimiento y completitud, estados vacíos y errores explícitos.
 
 Los estados y el cumplimiento se cargan manualmente; no se recalculan por vencimiento de fechas. Los filtros del listado no afectan al dashboard ni a la exportación completa de la base.
 
@@ -30,15 +33,17 @@ Los estados y el cumplimiento se cargan manualmente; no se recalculan por vencim
 2. Presionar **Crear tablero**, elegir un proyecto activo, completar nombre y descripción y guardar. Se crean las cinco listas iniciales de la API existente: Pendiente, En curso, En revisión, Bloqueado y Completado.
 3. Abrir el tablero para ver su proyecto, descripción y columnas. **Editar tablero** modifica nombre y descripción, no su proyecto.
 4. Usar **Crear lista** o **Editar lista**. El nombre es libre; la categoría funcional es independiente. Una lista con tarjetas puede renombrarse, pero su categoría queda protegida. **Ordenar lista antes/después** cambia solo la posición de la columna, no mueve las tarjetas a otra etapa.
-5. Usar **Crear tarjeta** en la lista correspondiente. El título es obligatorio; descripción, responsable, fechas y observaciones son opcionales. El vencimiento no puede ser anterior al inicio.
+5. Usar **Crear tarjeta** en la lista correspondiente. El título es obligatorio; descripción, prioridad, responsables, etiquetas, fechas y observaciones se editan en el diálogo de tarjeta. La prioridad predeterminada es Media; el vencimiento no puede ser anterior al inicio.
 6. Para reordenar una tarjeta, arrastrar desde el control **Arrastrar** y soltar antes/después de una tarjeta o al final de una etapa activa del mismo tablero. La indicación visual muestra el destino/posición. El orden se guarda antes de actualizar la vista. Para usar teclado, accionar **Subir/Bajar en la etapa**; **Etapa anterior/siguiente** continúa cambiando de lista.
 7. Para varias, marcar las casillas de las tarjetas o usar **Seleccionar todas en esta etapa**. La barra indica la cantidad y ofrece mover cada una a su etapa anterior/siguiente, trasladar todas al mismo destino, o **Cancelar selección**. Los movimientos por dirección son relativos a la etapa actual de cada tarjeta. La selección múltiple se aplica solo a las marcadas y conserva su orden visual relativo; las demás tarjetas y su orden se mantienen. Si hay varias seleccionadas, arrastrar una mueve solo esa tarjeta y lo indica; para mover el conjunto, usar las acciones de la barra. Si no existe un destino válido para alguna seleccionada, se cancela toda la operación.
 8. Las listas de destino se limitan a etapas activas del mismo tablero. No se permite cruzar tableros. Después de un movimiento confirmado, la interfaz se actualiza y la selección se limpia.
 9. Presionar el título de una tarjeta para consultar o editar su detalle en el mismo diálogo reutilizable. La marca **Completada** es explícita y no modifica el avance manual del proyecto. Las tarjetas que entran a la categoría Completado se marcan completadas; al salir se reabren.
 10. Archivar requiere confirmación. Para restaurar, activar **Incluir archivados** en el catálogo o **Incluir listas y tarjetas archivadas** dentro del tablero. Restaurar primero los contenedores: archivar un padre no cambia las marcas propias de sus hijos.
-11. Guardar confirma éxito solo después de escribir SQLite. Si falla, conservar los datos y permitir reintentar. **Cancelar / Esc** pide confirmación si hubo cambios y devuelve el foco; no cancela durante un guardado.
+11. En **Catálogos de responsables y etiquetas**, crear o buscar registros, editarlos y desactivarlos/reactivarlos. Los inactivos se consultan mediante **Incluir inactivos/inactivas**; no se ofrecen para asignaciones nuevas, pero permanecen visibles en tarjetas históricas.
+12. Usar **Buscar tarjetas** para título/descripción y combinar los filtros de responsable, etiqueta, prioridad, etapa y asignación (todas/con/sin responsables). El contador y el estado del tablero indican coincidencias; **Limpiar filtros** restablece la vista. Las columnas y el orden se mantienen. Mientras haya filtros activos, se deshabilitan el arrastre y el reordenamiento dentro de la etapa para evitar posiciones ambiguas. Si una selección contiene tarjetas ocultas, la acción múltiple exige confirmar explícitamente si deben incluirse.
+13. Guardar confirma éxito solo después de escribir SQLite. Si falla, conservar los datos y permitir reintentar. **Cancelar / Esc** pide confirmación si hubo cambios y devuelve el foco; no cancela durante un guardado.
 
-La gestión completa del catálogo de responsables corresponde a una fase posterior. El responsable histórico del proyecto no se convierte automáticamente en una persona del catálogo. Si el catálogo está vacío, las tarjetas permiten **Sin responsable**. El formulario y los indicadores históricos de proyectos mantienen sus funciones anteriores.
+El responsable histórico del proyecto no se convierte automáticamente en una persona del catálogo. Las tarjetas pueden quedar **Sin responsable**. El formulario y los indicadores históricos de proyectos mantienen sus funciones anteriores.
 
 ## Inicio y configuración de carpeta
 
@@ -72,10 +77,10 @@ Los proyectos se guardan exclusivamente en un archivo **SQLite3 estándar**, usa
 - Si falla la escritura, se mantienen los datos visibles anteriores y el formulario para reintentar; se muestra el error.
 - Un archivo corrupto o con un esquema incompatible se rechaza sin reemplazarlo por una base vacía.
 - **Exportar DB** descarga una copia completa; no modifica la ubicación conectada.
-- Las bases del esquema anterior requieren **Crear respaldo y actualizar**. Antes de escribir se crea y verifica un respaldo exacto; cancelar no modifica el original. Una base nueva usa directamente el esquema 1.
+- Las bases del esquema anterior requieren **Crear respaldo y actualizar**. Antes de escribir se crea y verifica un respaldo exacto; cancelar no modifica el original. Una base nueva usa el esquema 2. La migración 1 → 2 agrega asignaciones múltiples y estado de etiquetas; conserva la columna histórica de responsable y copia sus relaciones.
 - Una versión de esquema futura se rechaza. La eliminación de proyectos con tableros o actividad relacionada se protege mediante un error explícito.
 
-El respaldo se guarda en la carpeta autorizada con nombre único `vertex.pre-v1.…db`; las conexiones antiguas sin carpeta solicitan un destino de respaldo vacío. La guía de [migración y recuperación](docs/migraciones.md) explica el procedimiento y cómo volver a una copia anterior sin sobrescribir la base migrada.
+El respaldo se guarda en la carpeta autorizada con nombre único (`vertex.pre-v1.…db` o `vertex.pre-v2.…db`, según corresponda); las conexiones antiguas sin carpeta solicitan un destino de respaldo vacío. La guía de [migración y recuperación](docs/migraciones.md) explica el procedimiento y cómo volver a una copia anterior sin sobrescribir la base migrada.
 
 La app está diseñada para **una instancia escritora por base**. No implementa sincronización entre pestañas, procesos o usuarios. No editar simultáneamente el archivo desde otra herramienta. Mantener respaldos periódicos.
 
@@ -92,10 +97,10 @@ No incluye autenticación, roles, vista de historial de cambios, importación Ex
 | [index.html](index.html) | Estructura y controles |
 | [css/styles.css](css/styles.css) | Estilos y adaptación a impresión |
 | [js/db.js](js/db.js) | SQLite, archivos, permisos y conexión recordada |
-| [js/migraciones.js](js/migraciones.js) | Esquema 1, migración desde 0 y validación |
+| [js/migraciones.js](js/migraciones.js) | Esquema 2, migraciones secuenciales y validación |
 | [js/trabajo.js](js/trabajo.js) | Infraestructura relacional de trabajo y actividad |
 | [js/proyectos.js](js/proyectos.js) | CRUD, filtros y exportaciones |
-| [js/tableros.js](js/tableros.js) | Catálogo, Kanban básico y editor único de tableros/listas/tarjetas |
+| [js/tableros.js](js/tableros.js) | Catálogos locales, búsqueda/filtros, Kanban y diálogo único |
 | [js/dashboard.js](js/dashboard.js) | Métricas globales |
 | [js/app.js](js/app.js) | Inicialización, conexión y utilidades compartidas |
 | [db/vertex.db](db/vertex.db) | Base inicial; puede elegirse otra carpeta |
@@ -119,7 +124,7 @@ node --check js\tableros.js
 
 Las pruebas descargan la misma versión de sql.js usada por la app, ejecutan SQLite real y simulan los handles y permisos de archivos sin tocar la base del proyecto.
 
-La suite Node actual cubre **31 pruebas**. La validación adicional del navegador usa `probarInterfazTableros()`, `probarMovimientoTarjetas()` y `probarArrastreTarjetas()` en una página aislada sin base real, y comprueba reaperturas con binarios sintéticos. La prueba de arrastre dispara eventos DragEvent en un navegador real; no simula una interacción física de ratón ni táctil. Las instrucciones y resultados están en [arquitectura](docs/arquitectura.md#validación-de-la-interfaz-de-fases-3-y-4) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+La suite Node actual cubre **35 pruebas**. La validación adicional del navegador usa `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()` y `probarFase5Tableros()` en una página aislada sin base real, y comprueba reaperturas con binarios sintéticos. La prueba de arrastre dispara eventos DragEvent en un navegador real; no simula una interacción física de ratón ni táctil. Las instrucciones y resultados están en [arquitectura](docs/arquitectura.md#validación-de-la-interfaz-de-fases-3-y-4) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
 
 ## Documentación
 

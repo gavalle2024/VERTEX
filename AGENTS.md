@@ -40,14 +40,14 @@ VERTEX/
 │   ├── migraciones.js      # DDL, esquema versionado y validación; cargar antes de db.js
 │   ├── trabajo.js          # API relacional; cargar después de db.js
 │   ├── proyectos.js        # CRUD y renderizado de la tabla de proyectos
-│   ├── tableros.js         # Kanban básico y diálogo único; usa PSA.Trabajo
+│   ├── tableros.js         # Kanban, catálogos, búsqueda/filtros y diálogo único
 │   ├── dashboard.js        # Métricas y panel general
 │   └── app.js              # Bootstrap, utilidades globales (PSA.*)
 ├── db/
 │   └── vertex.db           # Base inicial; la app permite otra carpeta
 ├── tests/
 │   ├── db.test.cjs         # Regresión de persistencia con sql.js real
-│   └── tableros.browser.js # Prueba DOM aislada; no cargar en sesiones de uso
+│   └── tableros.browser.js # Pruebas DOM aisladas; no cargar en sesiones de uso
 ├── docs/
 │   ├── arquitectura.md     # Diseño y decisiones técnicas
 │   └── cambios.md          # Registro de cambios (changelog)
@@ -132,7 +132,7 @@ El orden en `index.html` es crítico:
 
 ## Modelo de datos
 
-El esquema SQLite y las migraciones se definen en `js/migraciones.js`, versión `PRAGMA user_version=1`. Ver `docs/migraciones.md` para las ocho tablas y sus relaciones. Campos históricos de `proyectos`, que se conservan:
+El esquema SQLite y las migraciones se definen en `js/migraciones.js`, versión `PRAGMA user_version=2`. Ver `docs/migraciones.md` para las nueve tablas y sus relaciones. Campos históricos de `proyectos`, que se conservan:
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
@@ -152,6 +152,8 @@ El esquema SQLite y las migraciones se definen en `js/migraciones.js`, versión 
 | `observaciones` | TEXT | Notas adicionales |
 
 Campos nuevos de proyectos: `descripcion`, `prioridad`, `archivado`, `responsable_id`. El formulario histórico aún no los expone. No vincular responsables por similitud de nombres ni reinterpretar avance manual como progreso calculado.
+
+La fase 5 administra responsables y etiquetas locales, con desactivación lógica; `tarjeta_responsables` y `tarjeta_etiquetas` conservan relaciones M:N. La migración 1 → 2 copia las asignaciones históricas de `tarjetas.responsable_id`. La UI presenta Crítica usando el valor SQLite compatible `Urgente`; no recrear ni migrar tarjetas por este alias.
 
 ---
 
@@ -177,10 +179,10 @@ Campos nuevos de proyectos: `descripcion`, `prioridad`, `archivado`, `responsabl
 
 ## Compatibilidad y configuración
 
-- El modelo y procedimiento de evolución de `docs/evolucion-visual.md` fueron aprobados. Las fases 2 y 3 están implementadas, y la fase 4 incluye movimiento individual/múltiple, arrastre y reordenamiento de tarjetas. Las vistas pendientes de fases 5 a 8 siguen en evolución. Consultar `docs/migraciones.md` para distinguir APIs disponibles de funciones expuestas en interfaz.
+- El modelo y procedimiento de evolución de `docs/evolucion-visual.md` fueron aprobados. Las fases 2 a 5 solicitadas están implementadas; Mis tareas, calendario e historial visual siguen pendientes. Consultar `docs/migraciones.md` para distinguir APIs disponibles de funciones expuestas en interfaz.
 
 - No hay fallback a localStorage ni migración automática de proyectos antiguos.
-- La migración de esquema SQLite 0 → 1 sí existe, pero requiere consentimiento y respaldo. No confundirla con migración de formatos localStorage.
+- Las migraciones de esquema SQLite 0 → 1 → 2 y 1 → 2 requieren consentimiento y respaldo. No confundirlas con migración de formatos localStorage.
 - Se restauran los handles de archivo anteriores y los nuevos registros `{archivo, carpeta}`.
 - Cambiar de carpeta abre su base: no mueve ni fusiona proyectos. Crear una base vacía requiere confirmación.
 - Si falla el selector, la carga o la escritura, conservar los datos confirmados y permitir reintentar. Informar errores de IndexedDB: la conexión actual puede funcionar aunque no se recuerde su ubicación.
@@ -191,7 +193,9 @@ Campos nuevos de proyectos: `descripcion`, `prioridad`, `archivado`, `responsabl
 - Sin bundler ni instalación de paquetes: `node --test tests\db.test.cjs` con Node.js 22+ e internet.
 - Las pruebas descargan sql.js 1.10.2, ejecutan SQLite real y simulan handles, permisos e IndexedDB. Nunca usar `db/vertex.db` para pruebas destructivas.
 - Verificar sintaxis con `node --check` y comprobar UI en Chrome/Edge para selección, permisos, reconexión y cambio de carpeta.
-- La fase 3 incorpora `tests/tableros.browser.js`, ejecutable solo en una página aislada sin conexión real; instrucciones en `docs/arquitectura.md`. Simula archivos e IndexedDB; no se incluye en `index.html`.
+- `tests/tableros.browser.js` se ejecuta solo en una página aislada sin conexión real; incluye flujos de fases 3, 4 y 5, simula archivos e IndexedDB y no se incluye en `index.html`.
+- Los filtros no deben modificar relaciones, posiciones ni orden persistido. Con filtros activos, arrastre y reordenamiento en etapa deshabilitados; si una selección incluye tarjetas ocultas, pedir la confirmación explícita existente antes de mover.
+- Responsables y etiquetas desactivados mantienen sus asignaciones históricas; no borrar asociaciones ni ofrecerlos para nuevas asignaciones.
 
 ---
 

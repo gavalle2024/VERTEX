@@ -35,6 +35,76 @@
     return PSA.Trabajo.getTableros().find(t => t.id === tableroId);
   }
 
+  function _textoFiltro(valor) {
+    return String(valor || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
+  }
+
+  function _filtrosTarjetasActivos() {
+    return !!_textoFiltro($('filtro-tarjetas-texto').value) ||
+      ['responsable', 'etiqueta', 'prioridad', 'lista', 'asignacion']
+        .some(nombre => !!$('filtro-tarjetas-' + nombre).value);
+  }
+
+  function _filtrosTarjetas() {
+    return {
+      texto: _textoFiltro($('filtro-tarjetas-texto').value),
+      responsable: $('filtro-tarjetas-responsable').value,
+      etiqueta: $('filtro-tarjetas-etiqueta').value,
+      prioridad: $('filtro-tarjetas-prioridad').value,
+      lista: $('filtro-tarjetas-lista').value,
+      asignacion: $('filtro-tarjetas-asignacion').value
+    };
+  }
+
+  function _coincideTarjeta(tarjeta, filtros) {
+    const responsables = (tarjeta.responsables || []).map(r => r.id);
+    const etiquetas = (tarjeta.etiquetas || []).map(etiqueta => etiqueta.id);
+    const texto = _textoFiltro(tarjeta.titulo + ' ' + tarjeta.descripcion);
+    return (!filtros.texto || texto.includes(filtros.texto)) &&
+      (!filtros.responsable || responsables.includes(filtros.responsable)) &&
+      (!filtros.etiqueta || etiquetas.includes(filtros.etiqueta)) &&
+      (!filtros.prioridad || tarjeta.prioridad === filtros.prioridad) &&
+      (!filtros.lista || tarjeta.lista_id === filtros.lista) &&
+      (!filtros.asignacion || (filtros.asignacion === 'con' ? responsables.length > 0 : responsables.length === 0));
+  }
+
+  function _actualizarOpcionesFiltro(listas) {
+    const poner = (id, filas, todas) => {
+      const select = $(id);
+      const previo = select.value;
+      select.innerHTML = `<option value="">${todas}</option>` + _opciones(filas, previo);
+      if (!filas.some(fila => fila.id === previo)) select.value = '';
+    };
+    poner('filtro-tarjetas-responsable', PSA.Trabajo.getResponsables(), 'Todos');
+    poner('filtro-tarjetas-etiqueta', PSA.Trabajo.getEtiquetas(), 'Todas');
+    poner('filtro-tarjetas-lista', listas, 'Todas');
+  }
+
+  function _renderCatalogos() {
+    const consultaResponsable = _textoFiltro($('buscar-responsables').value);
+    const consultaEtiqueta = _textoFiltro($('buscar-etiquetas').value);
+    const responsables = PSA.Trabajo.getResponsables().filter(fila =>
+      ($('ver-responsables-inactivos').checked || !fila.archivado) &&
+      _textoFiltro(fila.nombre).includes(consultaResponsable));
+    const etiquetas = PSA.Trabajo.getEtiquetas().filter(fila =>
+      ($('ver-etiquetas-inactivas').checked || !fila.archivado) &&
+      _textoFiltro(fila.nombre).includes(consultaEtiqueta));
+    $('catalogo-responsables').innerHTML = responsables.map(fila => `<div class="catalog-item">
+      <span>${e(fila.nombre)}${fila.archivado ? ' · Inactivo' : ''}</span>
+      <span class="actions">${_boton('Editar', 'responsable', fila.id, PSA.DB.ocupado)}
+        ${_boton(fila.archivado ? 'Reactivar' : 'Desactivar', 'archivo-responsable', fila.id, PSA.DB.ocupado)}</span>
+      </div>`).join('') || '<p class="empty">No hay responsables para esta búsqueda.</p>';
+    $('catalogo-etiquetas').innerHTML = etiquetas.map(fila => {
+      const color = /^#[0-9a-f]{6}$/i.test(fila.color) ? ` style="background-color:${e(fila.color)}"` : '';
+      return `<div class="catalog-item">
+      <span><span class="catalog-color"${color} aria-hidden="true"></span>
+        ${e(fila.nombre)}${fila.archivado ? ' · Inactiva' : ''}</span>
+      <span class="actions">${_boton('Editar', 'etiqueta', fila.id, PSA.DB.ocupado)}
+        ${_boton(fila.archivado ? 'Reactivar' : 'Desactivar', 'archivo-etiqueta', fila.id, PSA.DB.ocupado)}</span>
+      </div>`;
+    }).join('') || '<p class="empty">No hay etiquetas para esta búsqueda.</p>';
+  }
+
   function _bloqueado(tablero) {
     const proyecto = PSA.DB.getProyectos().find(p => p.id === tablero.proyecto_id);
     return !!tablero.archivado || !proyecto || !!proyecto.archivado;
@@ -51,22 +121,37 @@
     const seleccionada = tarjetasSeleccionadas.has(tarjeta.id);
     const posicion = tarjetasActivas.findIndex(fila => fila.id === tarjeta.id);
     const noMovible = bloqueada || tarjeta.archivada || PSA.DB.ocupado;
+    const arrastreDeshabilitado = _filtrosTarjetasActivos();
+    const prioridadNombre = tarjeta.prioridad === 'Urgente' ? 'Crítica' : tarjeta.prioridad;
+    const etiquetas = tarjeta.etiquetas || [];
+    const responsables = tarjeta.responsables || [];
+    const etiquetasHTML = etiquetas.map(etiqueta => {
+      const valido = /^#[0-9a-f]{6}$/i.test(etiqueta.color);
+      const color = valido ? parseInt(etiqueta.color.slice(1), 16) : 0xffffff;
+      const luminancia = 0.299 * (color >> 16 & 255) + 0.587 * (color >> 8 & 255) + 0.114 * (color & 255);
+      const estilo = valido ? ` style="background-color:${e(etiqueta.color)};color:${luminancia < 145 ? '#fff' : '#111'}"` : '';
+      return `<span class="work-badge${etiqueta.archivado ? ' work-badge-inactive' : ''}"${estilo}>${e(etiqueta.nombre)}${etiqueta.archivado ? ' · Inactiva' : ''}</span>`;
+    }).join('');
+    const responsablesHTML = responsables.map(responsable =>
+      `<span class="work-badge${responsable.archivado ? ' work-badge-inactive' : ''}">${e(responsable.nombre)}${responsable.archivado ? ' · Inactivo' : ''}</span>`
+    ).join('');
     return `<article class="work-card${prioridad}${tarjeta.completada ? ' work-complete' : ''}${seleccionada ? ' work-selected' : ''}"
       data-card-id="${e(tarjeta.id)}" data-archived="${tarjeta.archivada ? 'true' : 'false'}">
-      ${noMovible ? '' : `<span class="work-drag-handle" draggable="true" title="Arrastre desde este control para mover solo esta tarjeta"
+      ${noMovible || arrastreDeshabilitado ? '' : `<span class="work-drag-handle" draggable="true" title="Arrastre desde este control para mover solo esta tarjeta"
         aria-label="Arrastrar ${e(tarjeta.titulo)}">↕ Arrastrar</span>`}
       <label class="work-select"><input class="tarjeta-seleccion" type="checkbox" data-id="${e(tarjeta.id)}"
         aria-label="Seleccionar ${e(tarjeta.titulo)}"${seleccionada ? ' checked' : ''}${bloqueada || tarjeta.archivada ? ' disabled' : ''}>
         <span>${seleccionada ? 'Seleccionada' : 'Seleccionar tarjeta'}</span></label>
       <h4>${_boton(tarjeta.titulo, 'tarjeta', tarjeta.id)}</h4>
-      <p class="work-meta">${e(tarjeta.prioridad)}${tarjeta.completada ? ' · Completada' : ''}${tarjeta.archivada ? ' · Archivada' : ''}</p>
-      <p>${e(tarjeta.responsable_nombre || 'Sin responsable')}</p>
+      <div class="work-badges"><span class="work-badge work-badge-priority">Prioridad: ${e(prioridadNombre)}</span>${etiquetasHTML}</div>
+      <div class="work-badges">${responsablesHTML || '<span class="work-badge">Sin responsables</span>'}</div>
+      <p class="work-meta">${tarjeta.completada ? 'Completada' : ''}${tarjeta.archivada ? ' · Archivada' : ''}</p>
       <p class="${vencida ? 'work-overdue' : 'work-meta'}">${vencida ? 'Vencida · ' : 'Vencimiento: '}${e(PSA.formatFecha(tarjeta.vencimiento))}</p>
       <div class="actions no-print work-card-move">
         ${_boton('Subir en la etapa', 'tarjeta-posicion-anterior', tarjeta.id,
-          noMovible || posicion <= 0)}
+          noMovible || arrastreDeshabilitado || posicion <= 0)}
         ${_boton('Bajar en la etapa', 'tarjeta-posicion-siguiente', tarjeta.id,
-          noMovible || posicion < 0 || posicion === tarjetasActivas.length - 1)}
+          noMovible || arrastreDeshabilitado || posicion < 0 || posicion === tarjetasActivas.length - 1)}
         ${_boton('Etapa anterior', 'tarjeta-anterior', tarjeta.id, bloqueada || tarjeta.archivada || PSA.DB.ocupado)}
         ${_boton('Etapa siguiente', 'tarjeta-siguiente', tarjeta.id,
           bloqueada || tarjeta.archivada || PSA.DB.ocupado)}
@@ -110,26 +195,49 @@
     const mostrarArchivadas = $('tablero-ver-archivados').checked;
     const listas = todas.filter(l => mostrarArchivadas || !l.archivado);
     const tarjetas = PSA.Trabajo.getTarjetas().filter(t => t.tablero_id === tablero.id);
+    _actualizarOpcionesFiltro(activas);
+    const filtros = _filtrosTarjetas();
+    const tarjetasBase = tarjetas.filter(t => !t.archivada && !t.lista_archivada &&
+      !t.tablero_archivado && !t.proyecto_archivado);
+    const coincidencias = tarjetasBase.filter(t => _coincideTarjeta(t, filtros));
+    const idsVisibles = new Set(coincidencias.map(t => t.id));
+    const filtrosActivos = _filtrosTarjetasActivos();
     const idsActivos = new Set(tarjetas.filter(t => !t.archivada && !t.lista_archivada &&
       !t.tablero_archivado && !t.proyecto_archivado).map(t => t.id));
     tarjetasSeleccionadas = new Set(Array.from(tarjetasSeleccionadas).filter(id => idsActivos.has(id)));
     const seleccionadas = tarjetasSeleccionadas.size;
+    const seleccionadasOcultas = Array.from(tarjetasSeleccionadas).filter(id => !idsVisibles.has(id)).length;
     $('tablero-seleccion-cantidad').textContent = seleccionadas + (seleccionadas === 1 ? ' tarjeta seleccionada' : ' tarjetas seleccionadas');
-    $('tablero-seleccion-ayuda').textContent = seleccionadas
-      ? 'Las acciones afectan únicamente a las tarjetas seleccionadas.'
+    $('tablero-seleccion-ayuda').textContent = seleccionadasOcultas
+      ? seleccionadasOcultas + ' seleccionada(s) están ocultas por los filtros. Confirme explícitamente si quiere incluirlas en el movimiento.'
+      : seleccionadas
+        ? 'Las acciones afectan únicamente a las tarjetas seleccionadas visibles.'
       : 'Seleccione tarjetas con sus casillas o con «Seleccionar etapa».';
-    $('tablero-seleccion-destino').innerHTML = '<option value="">Seleccione etapa de destino</option>' + _opciones(activas, '', 'nombre');
+    $('tablero-incluir-seleccion-oculta').disabled = seleccionadasOcultas === 0;
+    $('tablero-resultados').textContent = coincidencias.length + ' de ' + tarjetasBase.length + ' tarjetas coinciden.';
+    $('tablero-filtros-estado').textContent = filtrosActivos
+      ? 'Hay filtros activos. El arrastre y el reordenamiento por posición están deshabilitados para proteger las tarjetas ocultas.'
+      : '';
+    if (!coincidencias.length) {
+      $('tablero-filtros-estado').textContent += (filtrosActivos ? ' ' : '') +
+        'No hay tarjetas que coincidan. Pruebe otros criterios o limpie los filtros.';
+    }
+    const destinoSeleccionado = $('tablero-seleccion-destino').value;
+    $('tablero-seleccion-destino').innerHTML = '<option value="">Seleccione etapa de destino</option>' +
+      _opciones(activas, destinoSeleccionado, 'nombre');
+    if (!activas.some(lista => lista.id === destinoSeleccionado)) $('tablero-seleccion-destino').value = '';
     $('tablero-seleccion-movimiento').classList.toggle('hidden', bloqueado);
     $('tablero-columnas').innerHTML = listas.length ? listas.map(lista => {
       const indice = activas.findIndex(l => l.id === lista.id);
       const inactiva = bloqueado || !!lista.archivado;
-      const contenido = tarjetas.filter(t => t.lista_id === lista.id && (mostrarArchivadas || !t.archivada));
+      const contenidoCompleto = tarjetas.filter(t => t.lista_id === lista.id && (mostrarArchivadas || !t.archivada));
+      const contenido = contenidoCompleto.filter(t => _coincideTarjeta(t, filtros));
       const movibles = contenido.filter(t => !t.archivada && !inactiva);
-      const tarjetasActivas = contenido.filter(t => !t.archivada);
+      const tarjetasActivas = contenidoCompleto.filter(t => !t.archivada);
       return `<section class="kanban-list${lista.categoria === 'bloqueado' ? ' work-blocked' : ''}"
         data-list-id="${e(lista.id)}" data-inactive="${inactiva ? 'true' : 'false'}" aria-label="${e(lista.nombre)}">
         <h3>${e(lista.nombre)}${lista.archivado ? ' · Archivada' : ''}</h3>
-        <p class="work-meta">${e(CATEGORIAS[lista.categoria])} · ${contenido.length} tarjeta(s)</p>
+        <p class="work-meta">${e(CATEGORIAS[lista.categoria])} · ${contenido.length} visible(s)</p>
         <div class="actions no-print">
           ${_boton('Editar lista', 'lista', lista.id, inactiva || PSA.DB.ocupado)}
           ${_boton('Ordenar lista antes', 'lista-anterior', lista.id, inactiva || indice <= 0 || PSA.DB.ocupado)}
@@ -139,10 +247,34 @@
             inactiva || !movibles.length || PSA.DB.ocupado)}
         </div>
         <div class="work-cards">${contenido.map(t => _tarjetaHTML(t, inactiva, activas, tarjetasActivas)).join('') ||
-          '<p class="empty">Sin tarjetas visibles en esta lista.</p>'}</div>
+          `<p class="empty">${filtrosActivos ? 'Ninguna tarjeta coincide en esta etapa.' : 'Sin tarjetas visibles en esta lista.'}</p>`}</div>
         <div class="actions no-print">${_boton('Crear tarjeta', 'nueva-tarjeta', lista.id, inactiva || PSA.DB.ocupado)}</div>
       </section>`;
     }).join('') : '<p class="empty">No hay listas visibles. Cree la primera lista o active «Incluir listas y tarjetas archivadas» para restaurarlas.</p>';
+    const resumenFiltros = [];
+    if (filtros.texto) resumenFiltros.push('Búsqueda: «' + $('filtro-tarjetas-texto').value.trim() + '»');
+    if (filtros.responsable) {
+      const responsable = PSA.Trabajo.getResponsables().find(fila => fila.id === filtros.responsable);
+      if (responsable) resumenFiltros.push('Responsable: ' + responsable.nombre);
+    }
+    if (filtros.etiqueta) {
+      const etiqueta = PSA.Trabajo.getEtiquetas().find(fila => fila.id === filtros.etiqueta);
+      if (etiqueta) resumenFiltros.push('Etiqueta: ' + etiqueta.nombre);
+    }
+    if (filtros.prioridad) resumenFiltros.push('Prioridad: ' +
+      (filtros.prioridad === 'Urgente' ? 'Crítica' : filtros.prioridad));
+    if (filtros.lista) {
+      const lista = todas.find(fila => fila.id === filtros.lista);
+      if (lista) resumenFiltros.push('Etapa: ' + lista.nombre);
+    }
+    if (filtros.asignacion) resumenFiltros.push('Asignación: ' +
+      (filtros.asignacion === 'con' ? 'con responsables' : 'sin responsables'));
+    if (filtrosActivos) {
+      $('tablero-filtros-estado').textContent = 'Filtros activos: ' + resumenFiltros.join(' · ') +
+        '. Arrastre y reordenamiento por posición deshabilitados para proteger las tarjetas ocultas.';
+      if (!coincidencias.length) $('tablero-filtros-estado').textContent +=
+        ' No hay tarjetas que coincidan; pruebe otros criterios o limpie los filtros.';
+    }
   }
 
   function _focoAccion(accion, id) {
@@ -156,7 +288,7 @@
     if (!tarjetasSeleccionadas.size) throw new Error('Seleccione al menos una tarjeta para mover.');
     const filas = PSA.Trabajo.getTarjetas();
     const listas = PSA.Trabajo.getListas(tableroId).filter(lista => !lista.archivado);
-    return Array.from(tarjetasSeleccionadas, id => {
+    const seleccion = Array.from(tarjetasSeleccionadas, id => {
       const fila = filas.find(t => t.id === id);
       if (!fila || fila.tablero_id !== tableroId || fila.archivada ||
           fila.lista_archivada || fila.tablero_archivado || fila.proyecto_archivado) {
@@ -165,6 +297,12 @@
       return fila;
     }).sort((a, b) => listas.findIndex(lista => lista.id === a.lista_id) -
       listas.findIndex(lista => lista.id === b.lista_id) || a.posicion - b.posicion || a.id.localeCompare(b.id));
+    const filtros = _filtrosTarjetas();
+    const ocultas = seleccion.filter(tarjeta => !_coincideTarjeta(tarjeta, filtros));
+    if (ocultas.length && !$('tablero-incluir-seleccion-oculta').checked) {
+      throw new Error('Hay ' + ocultas.length + ' tarjeta(s) seleccionada(s) ocultas por los filtros. Limpie los filtros o confirme «Incluir también las tarjetas seleccionadas que los filtros ocultan» antes de mover.');
+    }
+    return seleccion;
   }
 
   function _destinoRelativo(tarjeta, direccion, listas) {
@@ -229,6 +367,12 @@
   function _iniciarArrastre(event) {
     const controlador = event.target.closest('.work-drag-handle');
     if (!controlador) return;
+    if (_filtrosTarjetasActivos()) {
+      event.preventDefault();
+      $('tablero-arrastre-estado').textContent =
+        'Desactive todos los filtros antes de arrastrar o reordenar: las tarjetas ocultas deben conservar su posición.';
+      return;
+    }
     const tarjeta = controlador.closest('.work-card');
     const fila = tarjeta && PSA.Trabajo.getTarjetas().find(t =>
       t.id === tarjeta.dataset.cardId && t.tablero_id === tableroId);
@@ -400,6 +544,7 @@
 
   function render() {
     try {
+      _renderCatalogos();
       const proyectos = PSA.DB.getProyectos();
       _seleccion('tableros-proyecto', proyectos);
       const filtro = $('tableros-proyecto').value;
@@ -493,6 +638,17 @@
             .map(([valor, nombre]) => `<option value="${valor}"${valor === fila.categoria ? ' selected' : ''}>${nombre}</option>`).join('')}</select></label>`;
         contexto = 'Tablero: ' + tablero.nombre + '. El nombre es libre; la categoría no cambia al renombrar.' +
           (tieneTarjetas ? ' La categoría no se modifica mientras existan tarjetas.' : '');
+      } else if (tipo === 'responsable') {
+        fila = id ? PSA.Trabajo.getResponsables().find(r => r.id === id) : {};
+        if (!fila) throw new Error('El responsable ya no existe.');
+        campos = _campo('nombre', 'Nombre', fila.nombre, 'required maxlength="120"');
+        contexto = 'Responsable local; desactivarlo conserva las asignaciones históricas.';
+      } else if (tipo === 'etiqueta') {
+        fila = id ? PSA.Trabajo.getEtiquetas().find(etiqueta => etiqueta.id === id) : {};
+        if (!fila) throw new Error('La etiqueta ya no existe.');
+        campos = _campo('nombre', 'Nombre', fila.nombre, 'required maxlength="60"') +
+          _campo('color', 'Color', fila.color || '#476581', 'required pattern="#[0-9a-fA-F]{6}" title="Formato hexadecimal #RRGGBB"', 'color');
+        contexto = 'Las etiquetas inactivas se conservan en sus tarjetas y pueden reactivarse.';
       } else {
         if (!tablero) throw new Error('Abra primero un tablero.');
         fila = id ? PSA.Trabajo.getTarjetas().find(t => t.id === id && t.tablero_id === tablero.id) : { lista_id: padreId };
@@ -500,22 +656,32 @@
         const lista = PSA.Trabajo.getListas(tablero.id).find(l => l.id === fila.lista_id);
         if (!lista) throw new Error('La lista ya no existe.');
         soloLectura = _bloqueado(tablero) || !!lista.archivado || !!fila.archivada;
-        const responsables = PSA.Trabajo.getResponsables().filter(r => !r.archivado || r.id === fila.responsable_id);
+        const asignados = (fila.responsables || []).map(r => r.id);
+        const responsables = PSA.Trabajo.getResponsables().filter(r => !r.archivado || asignados.includes(r.id));
+        const etiquetasAsignadas = (fila.etiquetas || []).map(etiqueta => etiqueta.id);
+        const etiquetas = PSA.Trabajo.getEtiquetas().filter(etiqueta =>
+          !etiqueta.archivado || etiquetasAsignadas.includes(etiqueta.id));
         campos = _campo('titulo', 'Título', fila.titulo, 'required maxlength="200"') +
           _campo('descripcion', 'Descripción', fila.descripcion, '', 'textarea') +
-          `<label>Responsable<select name="responsable_id"><option value="">Sin responsable</option>${_opciones(responsables, fila.responsable_id)}</select></label>` +
+          `<label class="full">Responsables<select name="responsables" multiple size="4" aria-describedby="asignaciones-ayuda">
+            ${responsables.map(r => `<option value="${e(r.id)}"${asignados.includes(r.id) ? ' selected' : ''}>${e(r.nombre)}${r.archivado ? ' · Inactivo (asignado)' : ''}</option>`).join('')}
+          </select></label><input type="hidden" name="responsable_id" value="${e(asignados[0] || '')}">
+          <label class="full">Etiquetas<select name="etiquetas" multiple size="4" aria-describedby="asignaciones-ayuda">
+            ${etiquetas.map(etiqueta => `<option value="${e(etiqueta.id)}"${etiquetasAsignadas.includes(etiqueta.id) ? ' selected' : ''}>${e(etiqueta.nombre)}${etiqueta.archivado ? ' · Inactiva (asignada)' : ''}</option>`).join('')}
+          </select></label><p id="asignaciones-ayuda" class="work-meta full">Use Ctrl (Windows/Linux) o Command (macOS) para seleccionar varias opciones. Las asignaciones inactivas existentes se conservan.</p>` +
           `<label>Prioridad<select name="prioridad">${PSA.Trabajo.PRIORIDADES.map(p =>
-            `<option${p === (fila.prioridad || 'Media') ? ' selected' : ''}>${p}</option>`).join('')}</select></label>` +
+            `<option value="${p === 'Crítica' ? 'Urgente' : p}"${(p === 'Crítica' ? 'Urgente' : p) === (fila.prioridad || 'Media') ? ' selected' : ''}>${p}</option>`).join('')}</select></label>` +
           _campo('inicio', 'Fecha de inicio', fila.inicio, 'min="1000-01-01" max="9999-12-31"', 'date') +
           _campo('vencimiento', 'Vencimiento', fila.vencimiento, 'min="1000-01-01" max="9999-12-31"', 'date') +
           _campo('observaciones', 'Observaciones', fila.observaciones, '', 'textarea') +
           `<label class="check-label"><input name="completada" type="checkbox"${(id ? fila.completada : lista.categoria === 'completado') ? ' checked' : ''}>Completada</label>`;
         contexto = 'Tablero: ' + tablero.nombre + ' · Lista: ' + lista.nombre +
-          '. Responsables: catálogo existente; su gestión completa corresponde a la fase 5.';
+          '. Puede asignar varios responsables y etiquetas.';
       }
       editor = { tipo, fila, soloLectura };
       origenFoco = document.activeElement;
-      $('trabajo-dialog-titulo').textContent = (soloLectura ? 'Consultar ' : id ? 'Editar ' : 'Crear ') + tipo;
+      const nombres = { responsable: 'responsable', etiqueta: 'etiqueta', tablero: 'tablero', lista: 'lista', tarjeta: 'tarjeta' };
+      $('trabajo-dialog-titulo').textContent = (soloLectura ? 'Consultar ' : id ? 'Editar ' : 'Crear ') + nombres[tipo];
       $('trabajo-dialog-contexto').textContent = contexto + (soloLectura ? ' Elemento archivado: solo lectura. Restaure sus contenedores y el elemento para editar.' : '');
       $('trabajo-dialog-campos').innerHTML = campos;
       $('trabajo-dialog-error').textContent = '';
@@ -545,7 +711,8 @@
     if (!editor || editor.soloLectura || PSA.DB.ocupado) return;
     if (!$('trabajo-form').reportValidity()) return;
     $('trabajo-dialog-error').textContent = '';
-    const datos = Object.fromEntries(new FormData($('trabajo-form')));
+    const formulario = new FormData($('trabajo-form'));
+    const datos = Object.fromEntries(formulario);
     const { tipo, fila } = editor;
     const entidad = (tipo === 'tablero' ? 'el ' : 'la ') + tipo;
     const entrada = { ...datos };
@@ -557,16 +724,22 @@
     }
     if (tipo === 'tarjeta') {
       entrada.lista_id = fila.lista_id;
-      entrada.responsable_id = datos.responsable_id || null;
+      entrada.responsables = formulario.getAll('responsables').filter(Boolean);
+      if (!entrada.responsables.length && datos.responsable_id) entrada.responsables = [datos.responsable_id];
+      entrada.etiquetas = formulario.getAll('etiquetas').filter(Boolean);
       entrada.completada = datos.completada ? 1 : 0;
     }
     try {
-      const metodos = { tablero: 'guardarTablero', lista: 'guardarLista', tarjeta: 'guardarTarjeta' };
+      const metodos = { tablero: 'guardarTablero', lista: 'guardarLista', tarjeta: 'guardarTarjeta',
+        responsable: 'guardarResponsable', etiqueta: 'guardarEtiqueta' };
       const id = await PSA.Trabajo[metodos[tipo]](entrada);
       if (tipo === 'tablero') tableroId = id;
       cerrar(true);
       PSA.renderTodo();
-      $('tablero-titulo').focus();
+      if (tipo === 'responsable' || tipo === 'etiqueta') {
+        const boton = document.querySelector(`[data-accion="${tipo === 'responsable' ? 'nuevo-responsable' : 'nueva-etiqueta'}"]`);
+        if (boton) boton.focus();
+      } else $('tablero-titulo').focus();
       PSA.toast('Se guardó ' + entidad + ' correctamente.');
     } catch (error) {
       console.error('[PSA.Tableros] Error al guardar:', error);
@@ -577,17 +750,27 @@
 
   async function _archivar(tipo, id) {
     const filas = tipo === 'tablero' ? PSA.Trabajo.getTableros()
-      : tipo === 'lista' ? PSA.Trabajo.getListas(tableroId) : PSA.Trabajo.getTarjetas();
+      : tipo === 'lista' ? PSA.Trabajo.getListas(tableroId)
+        : tipo === 'tarjeta' ? PSA.Trabajo.getTarjetas()
+          : tipo === 'responsable' ? PSA.Trabajo.getResponsables() : PSA.Trabajo.getEtiquetas();
     const fila = filas.find(f => f.id === id);
     if (!fila) throw new Error('El elemento ya no existe.');
     const archivado = tipo === 'tarjeta' ? fila.archivada : fila.archivado;
-    if (!archivado && !confirm('¿Archivar ' + (fila.nombre || fila.titulo) +
-      '? Su contenido dejará de aparecer entre los elementos activos. Puede restaurarlo desde «Incluir archivados».')) return;
+    if (!archivado) {
+      const desactivarCatalogo = tipo === 'responsable' || tipo === 'etiqueta';
+      const confirmacion = desactivarCatalogo
+        ? '¿Desactivar «' + fila.nombre + '»? Se conservarán las asignaciones históricas; no estará disponible para nuevas tarjetas.'
+        : '¿Archivar ' + (fila.nombre || fila.titulo) +
+          '? Su contenido dejará de aparecer entre los elementos activos. Puede restaurarlo desde «Incluir archivados».';
+      if (!confirm(confirmacion)) return;
+    }
     await PSA.Trabajo.archivar(tipo, id, !archivado);
     PSA.renderTodo();
     if (tipo === 'tablero') $('tableros-proyecto').focus();
+    else if (tipo === 'responsable') $('buscar-responsables').focus();
+    else if (tipo === 'etiqueta') $('buscar-etiquetas').focus();
     else $('tablero-titulo').focus();
-    PSA.toast(archivado ? 'Elemento restaurado.' : 'Elemento archivado.');
+    PSA.toast(archivado ? 'Elemento reactivado o restaurado.' : 'Elemento desactivado o archivado.');
   }
 
   async function _accion(event) {
@@ -603,11 +786,22 @@
       } else if (accion === 'nuevo-tablero') editar('tablero');
       else if (accion === 'tablero') editar('tablero', id);
       else if (accion === 'editar-tablero-actual') editar('tablero', tableroId);
+      else if (accion === 'nuevo-responsable') editar('responsable');
+      else if (accion === 'responsable') editar('responsable', id);
+      else if (accion === 'nueva-etiqueta') editar('etiqueta');
+      else if (accion === 'etiqueta') editar('etiqueta', id);
       else if (accion === 'nueva-lista') editar('lista');
       else if (accion === 'lista') editar('lista', id);
       else if (accion === 'nueva-tarjeta') editar('tarjeta', null, id);
       else if (accion === 'tarjeta') editar('tarjeta', id);
       else if (accion.startsWith('archivo-')) await _archivar(accion.slice(8), id);
+      else if (accion === 'limpiar-filtros-tarjetas') {
+        ['filtro-tarjetas-texto', 'filtro-tarjetas-responsable', 'filtro-tarjetas-etiqueta',
+          'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion']
+          .forEach(control => { $(control).value = ''; });
+        $('tablero-incluir-seleccion-oculta').checked = false;
+        render();
+      }
       else if (accion === 'tarjeta-anterior' || accion === 'tarjeta-siguiente' ||
           accion === 'tarjeta-posicion-anterior' || accion === 'tarjeta-posicion-siguiente' ||
           accion === 'mover-tarjeta') {
@@ -620,7 +814,8 @@
         $('tablero-seleccion-cantidad').focus();
         PSA.toast('Selección de tarjetas cancelada.');
       } else if (accion === 'seleccionar-etapa') {
-        PSA.Trabajo.getTarjetas().filter(t => t.lista_id === id && !t.archivada).forEach(t =>
+        const filtros = _filtrosTarjetas();
+        PSA.Trabajo.getTarjetas().filter(t => t.lista_id === id && !t.archivada && _coincideTarjeta(t, filtros)).forEach(t =>
           tarjetasSeleccionadas.add(t.id));
         _renderDetalle();
         const botonEtapa = Array.from($('tablero-columnas').querySelectorAll('[data-accion="seleccionar-etapa"]'))
@@ -671,13 +866,34 @@
     $('tablero-ver-archivados').addEventListener('change', render);
     $('v-tableros').addEventListener('change', event => {
       const checkbox = event.target.closest('.tarjeta-seleccion');
-      if (!checkbox) return;
-      if (checkbox.checked) tarjetasSeleccionadas.add(checkbox.dataset.id);
-      else tarjetasSeleccionadas.delete(checkbox.dataset.id);
-      _renderDetalle();
-      const equivalente = Array.from($('tablero-columnas').querySelectorAll('.tarjeta-seleccion'))
-        .find(control => control.dataset.id === checkbox.dataset.id);
-      if (equivalente) equivalente.focus();
+      if (checkbox) {
+        if (checkbox.checked) tarjetasSeleccionadas.add(checkbox.dataset.id);
+        else tarjetasSeleccionadas.delete(checkbox.dataset.id);
+        _renderDetalle();
+        const equivalente = Array.from($('tablero-columnas').querySelectorAll('.tarjeta-seleccion'))
+          .find(control => control.dataset.id === checkbox.dataset.id);
+        if (equivalente) equivalente.focus();
+        return;
+      }
+      if (event.target.id === 'tablero-incluir-seleccion-oculta') {
+        _renderDetalle();
+        return;
+      }
+    });
+    ['filtro-tarjetas-texto', 'filtro-tarjetas-responsable', 'filtro-tarjetas-etiqueta',
+      'filtro-tarjetas-prioridad', 'filtro-tarjetas-lista', 'filtro-tarjetas-asignacion']
+      .forEach(id => $(id).addEventListener(id === 'filtro-tarjetas-texto' ? 'input' : 'change', () => {
+        $('tablero-incluir-seleccion-oculta').checked = false;
+        render();
+      }));
+    $('buscar-responsables').addEventListener('input', render);
+    $('buscar-etiquetas').addEventListener('input', render);
+    $('ver-responsables-inactivos').addEventListener('change', render);
+    $('ver-etiquetas-inactivas').addEventListener('change', render);
+    $('trabajo-form').addEventListener('change', event => {
+      if (event.target.name !== 'responsables') return;
+      const seleccionados = Array.from(event.target.selectedOptions, opcion => opcion.value);
+      $('trabajo-form').elements.namedItem('responsable_id').value = seleccionados[0] || '';
     });
     $('trabajo-form').addEventListener('submit', guardar);
     $('trabajo-dialog-cancelar').addEventListener('click', () => cerrar());

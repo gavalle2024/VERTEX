@@ -530,6 +530,180 @@ window.verificarReaperturaMovimiento = function (anterior) {
   return 'Ubicaciones, posiciones y orden de listas persistidos al reabrir';
 };
 
+window.probarFase5Tableros = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const $ = selector => document.querySelector(selector);
+  const click = accion => {
+    const boton = document.querySelector('[data-accion="' + accion + '"]');
+    if (!boton || boton.disabled) throw new Error('Acción no disponible: ' + accion);
+    boton.click();
+  };
+  const control = (accion, id) => Array.from(document.querySelectorAll('[data-accion="' + accion + '"]'))
+    .find(elemento => elemento.dataset.id === id);
+  const esperar = async () => {
+    for (let i = 0; i < 1000; i++) {
+      if (!PSA.DB.ocupado) { await Promise.resolve(); return; }
+      await Promise.resolve();
+    }
+    throw new Error('La escritura de fase 5 no finalizó.');
+  };
+  const guardar = async () => { $('#trabajo-form').requestSubmit(); await esperar(); };
+  const nuevoProyecto = {
+    id: PSA.genId(), nombre: 'Fase 5 UI', responsable: 'Responsable histórico', division: '',
+    inicio: '2026-10-25', meta: '', fin: '', estado: 'En curso', avance: 0,
+    implementacion: 'No iniciado', cumplimiento: 'En curso (pendiente de evaluar)',
+    objetivo: '', resultado: '', observaciones: ''
+  };
+  await window.prepararPruebaTableros();
+  await PSA.DB.saveProyecto(nuevoProyecto, true);
+  PSA.cambiarTab('v-tableros', 'v-tableros');
+
+  click('nuevo-responsable');
+  $('#trabajo-form [name="nombre"]').value = 'Ana Torres';
+  await guardar();
+  const ana = PSA.Trabajo.getResponsables().find(fila => fila.nombre === 'Ana Torres');
+  click('nuevo-responsable');
+  $('#trabajo-form [name="nombre"]').value = 'Luis Díaz';
+  await guardar();
+  const luis = PSA.Trabajo.getResponsables().find(fila => fila.nombre === 'Luis Díaz');
+  check(!!ana && !!luis, 'Administración crea responsables locales');
+  click('nuevo-responsable');
+  $('#trabajo-form [name="nombre"]').value = ' ana   torres ';
+  await guardar();
+  check($('#trabajo-dialog-error').textContent.includes('Ya existe') &&
+    PSA.Trabajo.getResponsables().length === 2, 'El catálogo rechaza duplicados normalizados');
+  $('#trabajo-dialog-cancelar').click();
+
+  click('nueva-etiqueta');
+  $('#trabajo-form [name="nombre"]').value = 'Desarrollo';
+  $('#trabajo-form [name="color"]').value = '#336699';
+  await guardar();
+  const desarrollo = PSA.Trabajo.getEtiquetas().find(fila => fila.nombre === 'Desarrollo');
+  click('nueva-etiqueta');
+  $('#trabajo-form [name="nombre"]').value = 'Urgente';
+  $('#trabajo-form [name="color"]').value = '#aa3311';
+  await guardar();
+  const urgente = PSA.Trabajo.getEtiquetas().find(fila => fila.nombre === 'Urgente');
+  check(!!desarrollo && !!urgente, 'Administración crea etiquetas con color');
+
+  const tablero = await PSA.Trabajo.guardarTablero({
+    proyecto_id: nuevoProyecto.id, nombre: 'Búsqueda y filtros'
+  });
+  const listas = PSA.Trabajo.getListas(tablero);
+  const [activa, destino] = listas;
+  PSA.Tableros.abrirProyecto(nuevoProyecto.id);
+  document.querySelector('[data-accion="abrir"][data-id="' + tablero + '"]').click();
+  click('nueva-tarjeta');
+  $('#trabajo-form [name="titulo"]').value = 'Acta Operativa';
+  $('#trabajo-form [name="descripcion"]').value = 'Documento de despliegue urgente';
+  $('#trabajo-form [name="responsables"] option[value="' + ana.id + '"]').selected = true;
+  $('#trabajo-form [name="responsables"] option[value="' + luis.id + '"]').selected = true;
+  $('#trabajo-form [name="etiquetas"] option[value="' + desarrollo.id + '"]').selected = true;
+  $('#trabajo-form [name="etiquetas"] option[value="' + urgente.id + '"]').selected = true;
+  $('#trabajo-form [name="prioridad"]').value = 'Urgente';
+  await guardar();
+  const tarjetaActa = PSA.Trabajo.getTarjetas().find(fila => fila.titulo === 'Acta Operativa');
+  await PSA.Trabajo.guardarTarjeta({
+    lista_id: activa.id, titulo: 'Reunión semanal', descripcion: 'Seguimiento general'
+  });
+  PSA.Tableros.render();
+  check(tarjetaActa.responsables.length === 2 && tarjetaActa.etiquetas.length === 2 &&
+    tarjetaActa.prioridad === 'Urgente', 'La tarjeta persiste varias asignaciones y prioridad crítica');
+
+  const ordenAntes = PSA.Trabajo.getTarjetas().map(fila => [fila.id, fila.lista_id, fila.posicion]);
+  $('#filtro-tarjetas-texto').value = '  OPERATIVA ';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1 &&
+    $('#tablero-resultados').textContent.includes('1 de 2'), 'Búsqueda normalizada sin distinguir mayúsculas');
+  $('#filtro-tarjetas-texto').value = 'DESPLIEGUE';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1, 'Búsqueda por descripción');
+  $('#filtro-tarjetas-texto').value = '';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  $('#filtro-tarjetas-responsable').value = ana.id;
+  $('#filtro-tarjetas-responsable').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1, 'Filtro individual por responsable');
+  $('#filtro-tarjetas-responsable').value = '';
+  $('#filtro-tarjetas-responsable').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-etiqueta').value = urgente.id;
+  $('#filtro-tarjetas-etiqueta').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1, 'Filtro individual por etiqueta');
+  $('#filtro-tarjetas-etiqueta').value = '';
+  $('#filtro-tarjetas-etiqueta').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-prioridad').value = 'Urgente';
+  $('#filtro-tarjetas-prioridad').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1, 'Filtro individual por prioridad');
+  $('#filtro-tarjetas-prioridad').value = '';
+  $('#filtro-tarjetas-prioridad').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-lista').value = activa.id;
+  $('#filtro-tarjetas-lista').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 2, 'Filtro individual por etapa');
+  $('#filtro-tarjetas-lista').value = '';
+  $('#filtro-tarjetas-lista').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-asignacion').value = 'sin';
+  $('#filtro-tarjetas-asignacion').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1 &&
+    $('.work-card h4').textContent.includes('Reunión semanal'), 'Filtro individual de tarjetas sin responsables');
+  $('#filtro-tarjetas-asignacion').value = '';
+  $('#filtro-tarjetas-asignacion').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-texto').value = 'sin coincidencias';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 0 &&
+    $('#tablero-filtros-estado').textContent.includes('No hay tarjetas'), 'Estado vacío con filtros sin resultados');
+  $('#filtro-tarjetas-texto').value = '';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  $('#filtro-tarjetas-texto').value = 'documento';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  $('#filtro-tarjetas-responsable').value = ana.id;
+  $('#filtro-tarjetas-responsable').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-etiqueta').value = desarrollo.id;
+  $('#filtro-tarjetas-etiqueta').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-prioridad').value = 'Urgente';
+  $('#filtro-tarjetas-prioridad').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-lista').value = activa.id;
+  $('#filtro-tarjetas-lista').dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-asignacion').value = 'con';
+  $('#filtro-tarjetas-asignacion').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelectorAll('.work-card').length === 1 &&
+    $('.work-card').dataset.cardId === tarjetaActa.id, 'Combina búsqueda, responsable, etiqueta, prioridad, etapa y estado de asignación');
+  check(!document.querySelector('.work-drag-handle') &&
+    control('tarjeta-posicion-anterior', tarjetaActa.id).disabled,
+  'Filtros deshabilitan arrastre/reordenamiento para preservar posiciones ocultas');
+  check(JSON.stringify(PSA.Trabajo.getTarjetas().map(fila => [fila.id, fila.lista_id, fila.posicion])) ===
+    JSON.stringify(ordenAntes), 'Filtrar no modifica datos ni orden persistido');
+
+  click('limpiar-filtros-tarjetas');
+  const tarjetaOculta = PSA.Trabajo.getTarjetas().find(fila => fila.titulo === 'Reunión semanal');
+  const seleccion = document.querySelector('.tarjeta-seleccion[data-id="' + tarjetaOculta.id + '"]');
+  seleccion.checked = true;
+  seleccion.dispatchEvent(new Event('change', { bubbles: true }));
+  $('#filtro-tarjetas-texto').value = 'acta';
+  $('#filtro-tarjetas-texto').dispatchEvent(new Event('input', { bubbles: true }));
+  $('#tablero-seleccion-destino').value = destino.id;
+  const antesMover = JSON.stringify(PSA.Trabajo.getTarjetas().map(fila => [fila.id, fila.lista_id, fila.posicion]));
+  click('mover-seleccion-destino');
+  await Promise.resolve();
+  check($('#tableros-error').textContent.includes('ocultas') &&
+    JSON.stringify(PSA.Trabajo.getTarjetas().map(fila => [fila.id, fila.lista_id, fila.posicion])) === antesMover,
+  'Movimiento múltiple rechaza tarjetas ocultas sin alterar el tablero');
+  $('#tablero-incluir-seleccion-oculta').checked = true;
+  $('#tablero-incluir-seleccion-oculta').dispatchEvent(new Event('change', { bubbles: true }));
+  click('mover-seleccion-destino');
+  await esperar();
+  check(PSA.Trabajo.getTarjetas().find(fila => fila.id === tarjetaOculta.id).lista_id === destino.id,
+    'La selección oculta se mueve solo tras confirmación explícita');
+  click('limpiar-filtros-tarjetas');
+  check($('#tablero-resultados').textContent.includes('2 de 2') &&
+    !$('#tablero-columnas').textContent.includes('No hay tarjetas que coincidan'),
+  'Limpiar filtros restablece los resultados y permite seguir operando');
+
+  return { resultados, tableroId: tablero, responsables: [ana.id, luis.id], etiquetas: [desarrollo.id, urgente.id] };
+};
+
 window.probarArrastreTarjetas = async function () {
   const resultados = [];
   const check = (valor, nombre) => {

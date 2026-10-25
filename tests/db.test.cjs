@@ -389,7 +389,7 @@ test('migración con consentimiento, respaldo exacto, campos históricos intacto
   const migrada = new SQL.Database(destino.file.datos);
   const columnas = valores[0].columns.join(',');
   assert.deepEqual(migrada.exec(`SELECT ${columnas} FROM proyectos`), valores);
-  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 1);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 2);
   assert.equal(migrada.exec('SELECT count(*) FROM responsables')[0].values[0][0], 0);
   assert.equal(migrada.exec('SELECT count(*) FROM actividad')[0].values[0][0], 0);
   assert.equal(migrada.exec('SELECT prioridad,archivado,responsable_id,descripcion FROM proyectos')[0].values[0][0], 'Media');
@@ -537,6 +537,134 @@ test('API relacional crea entidades, asignaciones, etiquetas y actividad confirm
   const nuevo = entorno(app.store.get('vertex_db'));
   await nuevo.db.init();
   assert.equal(nuevo.trabajo.getTarjetas()[0].titulo, "Tarea O'Brien <img>");
+  assert.equal(nuevo.trabajo.getTarjetaEtiquetas(tarjeta).length, 1);
+});
+
+test('fase 5: responsables normalizados, asignaciones múltiples e historial inactivo', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Fase 5' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const r1 = await app.trabajo.guardarResponsable({ nombre: ' Ana  Pérez ' });
+  const r2 = await app.trabajo.guardarResponsable({ nombre: 'Bruno' });
+  await assert.rejects(app.trabajo.guardarResponsable({ nombre: 'ana pérez' }), /Ya existe/);
+  await assert.rejects(app.trabajo.guardarResponsable({ nombre: '   ' }), /obligatorio/);
+  await app.trabajo.guardarResponsable({ id: r1, nombre: 'Ana Pérez editada' });
+  const tarjeta = await app.trabajo.guardarTarjeta({
+    lista_id: lista, titulo: 'Asignación múltiple', responsables: [r1, r2, r1]
+  });
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas()[0].responsables, r => r.id), [r1, r2]);
+  await app.trabajo.archivar('responsable', r2, true);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas()[0].responsables, r => r.id), [r1, r2]);
+  assert.equal(app.trabajo.getTarjetas()[0].responsables[1].archivado, 1);
+  await app.trabajo.guardarTarjeta({ id: tarjeta, lista_id: lista, titulo: 'Conserva inactivo', responsables: [r1, r2] });
+  const r3 = await app.trabajo.guardarResponsable({ nombre: 'Carla' });
+  await app.trabajo.archivar('responsable', r3, true);
+  await assert.rejects(app.trabajo.guardarTarjeta({
+    lista_id: lista, titulo: 'No asignar inactivo', responsables: [r3]
+  }), /inactivos/);
+  await app.trabajo.archivar('responsable', r2, false);
+  await app.trabajo.guardarTarjeta({ id: tarjeta, lista_id: lista, titulo: 'Edición conservadora' });
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas()[0].responsables, r => r.id), [r1, r2]);
+  const bytes = app.db.exportarDB();
+  await assert.rejects(app.db.transaccion(tx => {
+    tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [tarjeta, 'inexistente']);
+  }), /FOREIGN KEY/);
+  assert.deepEqual(app.db.exportarDB(), bytes);
+});
+
+test('fase 5: catálogo de etiquetas, color, asignación múltiple y archivado histórico', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Etiquetas' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const desarrollo = await app.trabajo.guardarEtiqueta({ nombre: 'Desarrollo', color: '#336699' });
+  const revision = await app.trabajo.guardarEtiqueta({ nombre: 'Revisión', color: '#aabbcc' });
+  await assert.rejects(app.trabajo.guardarEtiqueta({ nombre: '  desarrollo ', color: '#112233' }), /Ya existe/);
+  await assert.rejects(app.trabajo.guardarEtiqueta({ nombre: 'Inválida', color: 'red' }), /hexadecimal/);
+  await app.trabajo.guardarEtiqueta({ id: revision, nombre: 'Revisión final', color: '#abcdef' });
+  const tarjeta = await app.trabajo.guardarTarjeta({
+    lista_id: lista, titulo: 'Clasificada', etiquetas: [desarrollo, revision, desarrollo]
+  });
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas()[0].etiquetas, e => e.id), [desarrollo, revision]);
+  await app.trabajo.archivar('etiqueta', desarrollo, true);
+  await app.trabajo.guardarTarjeta({ id: tarjeta, lista_id: lista, titulo: 'Conserva etiqueta', etiquetas: [desarrollo, revision] });
+  assert.equal(app.trabajo.getTarjetas()[0].etiquetas[0].archivado, 1);
+  const nueva = await app.trabajo.guardarEtiqueta({ nombre: 'Nueva', color: '#123456' });
+  await app.trabajo.archivar('etiqueta', nueva, true);
+  await assert.rejects(app.trabajo.guardarTarjeta({
+    lista_id: lista, titulo: 'Etiqueta inactiva', etiquetas: [nueva]
+  }), /inactivas/);
+  await app.trabajo.guardarTarjeta({ id: tarjeta, lista_id: lista, titulo: 'Edición sin selección de etiquetas' });
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas()[0].etiquetas, e => e.id), [desarrollo, revision]);
+  await app.trabajo.archivar('etiqueta', desarrollo, false);
+  assert.equal(app.trabajo.getEtiquetas().find(e => e.id === desarrollo).archivado, 0);
+});
+
+test('fase 5: prioridad crítica compatible y cambio de etapa sin alterar prioridad', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Prioridades' });
+  const [origen, destino] = app.trabajo.getListas(tablero);
+  const tarjeta = await app.trabajo.guardarTarjeta({ lista_id: origen.id, titulo: 'Predeterminada' });
+  assert.equal(app.trabajo.getTarjetas()[0].prioridad, 'Media');
+  await app.trabajo.guardarTarjeta({ id: tarjeta, lista_id: origen.id, titulo: 'Prioridad crítica', prioridad: 'Crítica' });
+  assert.equal(app.trabajo.getTarjetas()[0].prioridad, 'Urgente');
+  await assert.rejects(app.trabajo.guardarTarjeta({
+    id: tarjeta, lista_id: origen.id, titulo: 'Prioridad inválida', prioridad: 'Inmediata'
+  }), /prioridad/);
+  await app.trabajo.moverTarjeta(tarjeta, destino.id, 0);
+  assert.equal(app.trabajo.getTarjetas()[0].prioridad, 'Urgente');
+  assert.equal(app.trabajo.getTarjetas()[0].lista_id, destino.id);
+});
+
+test('fase 5: migración v1→v2 conserva responsables y asignaciones históricas', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Migración sintética' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const responsable = await app.trabajo.guardarResponsable({ nombre: 'Histórico v1' });
+  const etiqueta = await app.trabajo.guardarEtiqueta({ nombre: 'Anterior', color: '#123abc' });
+  const tarjeta = await app.trabajo.guardarTarjeta({
+    lista_id: lista, titulo: 'Tarjeta v1', responsable_id: responsable, etiquetas: [etiqueta]
+  });
+  const v1 = new SQL.Database(app.db.exportarDB());
+  v1.run('DROP INDEX idx_tarjeta_responsables_responsable');
+  v1.run('DROP TABLE tarjeta_responsables');
+  v1.run('ALTER TABLE etiquetas DROP COLUMN archivado');
+  v1.run('PRAGMA user_version=1');
+  const bytes = v1.export();
+  v1.close();
+
+  const rollback = new SQL.Database(bytes);
+  rollback.run('PRAGMA foreign_keys=ON');
+  const runOriginal = rollback.run.bind(rollback);
+  rollback.run = (sql, params) => {
+    if (sql === 'PRAGMA user_version=2') throw new Error('Fallo de migración v2 simulado');
+    return runOriginal(sql, params);
+  };
+  assert.throws(() => app.esquema.migrar(rollback), /Fallo de migración v2/);
+  assert.equal(rollback.exec('PRAGMA user_version')[0].values[0][0], 1);
+  assert.equal(rollback.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='tarjeta_responsables'").length, 0);
+  assert.equal(rollback.exec('PRAGMA table_info(etiquetas)')[0].values.some(row => row[1] === 'archivado'), false);
+  rollback.close();
+
+  const destino = await solicitarMigracion(app, bytes);
+  const resultado = await app.db.migrarConexion();
+  assert.equal(resultado.ok, true);
+  assert.ok(resultado.respaldo.startsWith('vertex.pre-v2.'));
+  assert.equal(Buffer.compare(Buffer.from(destino.respaldos.get(resultado.respaldo).datos),
+    Buffer.from(bytes)), 0);
+  const migrada = new SQL.Database(destino.file.datos);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 2);
+  assert.deepEqual(Array.from(migrada.exec('SELECT tarjeta_id,responsable_id FROM tarjeta_responsables')[0].values[0]),
+    [tarjeta, responsable]);
+  migrada.close();
+  assert.equal(app.trabajo.getTarjetas().find(fila => fila.id === tarjeta).responsables[0].id, responsable);
+  assert.equal(app.trabajo.getTarjetas().find(fila => fila.id === tarjeta).etiquetas[0].id, etiqueta);
+  const nuevo = entorno(app.store.get('vertex_db'));
+  await nuevo.db.init();
+  assert.equal(nuevo.trabajo.getTarjetas().find(fila => fila.id === tarjeta).titulo, 'Tarjeta v1');
   assert.equal(nuevo.trabajo.getTarjetaEtiquetas(tarjeta).length, 1);
 });
 

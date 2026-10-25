@@ -6,6 +6,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-10-24
 
+### Organización de tarjetas y filtros (fase 5) — 2026-10-25
+- Se extendió el esquema a versión 2 con migración incremental `1 → 2`: nueva tabla `tarjeta_responsables` muchos-a-muchos, clave primaria compuesta, claves foráneas restrictivas e índice de búsqueda por responsable; `etiquetas.archivado` con default seguro. La migración copia las relaciones previas desde `tarjetas.responsable_id` y conserva esa columna y todas las posiciones/datos existentes. El proceso `0 → 1 → 2` también quedó cubierto.
+- Responsables y etiquetas se pueden crear, buscar, renombrar, desactivar y reactivar desde la pestaña Tableros. Se normalizan los espacios y se rechazan duplicados por NFKC/minúsculas; colores deben ser `#RRGGBB`. La desactivación conserva asignaciones y los registros inactivos aparecen en las tarjetas históricas pero no en opciones para asignar de nuevo.
+- El editor único de tarjetas permite varias asignaciones de responsables y etiquetas; `guardarTarjeta` las actualiza atómicamente, elimina duplicados de entrada y conserva relaciones si se edita sin enviar esos campos. Las relaciones tienen FK y no dejan huérfanos; la asignación singular existente se conserva como compatibilidad para proyectos y consumidores previos.
+- Prioridades visibles: **Crítica, Alta, Media y Baja**, con default Media. Crítica se persiste como el valor histórico `Urgente` aceptado por el CHECK existente; no se reconstruyen tarjetas ni se asigna prioridad crítica a registros históricos.
+- Se incorporó búsqueda inmediata por título/descripción y filtros combinables de responsable, etiqueta, prioridad, etapa y con/sin responsables. El tablero conserva sus columnas y orden; muestra resultados, resumen de criterios, estado vacío y acción de limpieza.
+- Con cualquier filtro activo se deshabilitan arrastre y reordenamiento de posición para impedir que el índice visual parcial altere el orden real. Los movimientos individuales/múltiples mantienen su contrato. Seleccionar etapa agrega solo tarjetas visibles; si hay seleccionadas ocultas, la operación múltiple exige confirmarlas explícitamente mediante un checkbox; la opción se reinicia al cambiar filtros.
+- `getTarjetas()` presenta arrays de responsables/etiquetas con estado archivado, en dos consultas relacionales por render; las tarjetas muestran distintivos compactos con contraste calculado y estado textual, sin depender solo del color.
+- Pruebas Node: `node --test --test-reporter=spec tests\db.test.cjs`: **35 aprobadas, 0 fallidas**. Se añadieron casos para normalización, duplicados, inactivos, asignaciones M:N, etiquetas/color, prioridad, rollback y migración v1 → v2 con datos sintéticos.
+- Prueba browser `probarFase5Tableros()`: **18 comprobaciones** para catálogos, prioridades, búsqueda/filtros individuales y combinados, orden no modificado y política de selección oculta. Se realizaron en Chromium con SQLite/binario sintético, nunca con la base habitual.
+- La base de uso habitual no fue migrada ni modificada; no se instalaron dependencias, no hubo operaciones remotas ni commits. Mis tareas, calendario, historial visual y arrastre táctil continúan pendientes.
+
 ### Kanban con arrastre y reordenamiento (fase 4) — 2026-10-25
 - El arrastre comienza únicamente en el control dedicado de cada tarjeta; los botones, casillas y selectores internos no inician una operación de arrastre.
 - Se puede insertar una tarjeta antes/después de otra o al final de una etapa del mismo tablero, y cambiar el orden dentro de su propia etapa. Las etapas activas se resaltan, la posición propuesta queda señalada con texto y estilos, y las etapas inválidas se rechazan.
