@@ -36,6 +36,8 @@
   <button role="tab" aria-selected="false"
           data-view="v-proyectos"
           onclick="PSA.cambiarTab('v-proyectos', this)">Proyectos</button>
+  <button role="tab" aria-selected="false" data-view="v-tableros"
+          onclick="PSA.cambiarTab('v-tableros', this)">Tableros</button>
 </nav>
 
 <!-- ══════════════════════════════════════════
@@ -63,6 +65,21 @@
       Se usará <code>vertex.db</code>; si no existe, se pedirá confirmar su creación.
       El navegador recuerda el acceso, pero no expone la ruta absoluta.
     </p>
+  </div>
+</div>
+
+<div id="migration-overlay" class="connect-overlay hidden" role="dialog"
+     aria-modal="true" aria-labelledby="migration-title">
+  <div class="connect-box">
+    <h2 id="migration-title">Actualizar base de datos</h2>
+    <p id="migration-msg" aria-live="polite"></p>
+    <p>Se conservarán todos los proyectos. Antes de actualizar se creará y verificará
+      un respaldo exacto del archivo original. Si no se puede respaldar, no se aplicará la migración.</p>
+    <button id="migration-confirm" class="btn btn-primary"
+            onclick="PSA.confirmarMigracion()">Crear respaldo y actualizar</button>
+    <button class="btn btn-ghost" onclick="PSA.cancelarMigracion()">Cancelar</button>
+    <p class="connect-hint">No cierre la ventana ni abra la base con otra aplicación durante la actualización.
+      Para volver a la versión anterior, use una copia del respaldo con esa versión de VERTEX.</p>
   </div>
 </div>
 
@@ -293,7 +310,70 @@
 
   </section>
 
+  <section id="v-tableros" class="view" role="tabpanel" aria-label="Tableros">
+    <div class="card">
+      <h2>Tableros de proyectos</h2>
+      <div class="filters no-print">
+        <label>Proyecto
+          <select id="tableros-proyecto" aria-label="Filtrar tableros por proyecto"></select>
+        </label>
+        <label class="check-label">
+          <input id="tableros-archivados" type="checkbox"> Incluir archivados
+        </label>
+        <button class="btn btn-primary" data-accion="nuevo-tablero">Crear tablero</button>
+      </div>
+      <p id="tableros-error" class="form-error" role="alert"></p>
+      <div id="tableros-catalogo" class="board-catalog"></div>
+    </div>
+    <div id="tablero-detalle" class="hidden">
+      <div class="card">
+        <p id="tablero-proyecto"></p>
+        <h2 id="tablero-titulo" tabindex="-1"></h2>
+        <p id="tablero-descripcion" class="preserve-text"></p>
+        <p id="tablero-fechas" class="work-meta"></p>
+        <div class="actions no-print">
+          <button class="btn btn-ghost" data-accion="editar-tablero-actual">Editar tablero</button>
+          <button class="btn btn-primary" data-accion="nueva-lista">Crear lista</button>
+          <label class="check-label"><input id="tablero-ver-archivados" type="checkbox"> Incluir listas y tarjetas archivadas</label>
+        </div>
+        <p id="tablero-aviso" role="status"></p>
+        <p id="tablero-arrastre-estado" class="work-meta" role="status" aria-live="polite">
+          Para mover una tarjeta, arrastre desde su control «Arrastrar». Use «Subir/Bajar en la etapa» como alternativa accesible.
+          El arrastre siempre afecta a una sola tarjeta; use la barra para mover varias.
+        </p>
+      </div>
+      <div id="tablero-seleccion-movimiento" class="card no-print" aria-label="Mover tarjetas seleccionadas">
+        <h3>Movimiento de tarjetas seleccionadas</h3>
+        <p id="tablero-seleccion-cantidad" aria-live="polite" tabindex="-1">0 tarjetas seleccionadas</p>
+        <p id="tablero-seleccion-ayuda" class="work-meta"></p>
+        <div class="actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-anterior">Mover cada una a la etapa anterior</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-siguiente">Mover cada una a la etapa siguiente</button>
+          <label class="work-destination">Destino específico
+            <select id="tablero-seleccion-destino" aria-label="Destino de las tarjetas seleccionadas"></select>
+          </label>
+          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-destino">Mover seleccionadas al destino</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-accion="cancelar-seleccion">Cancelar selección</button>
+        </div>
+      </div>
+      <div id="tablero-columnas" class="kanban" aria-label="Listas y tarjetas del tablero"></div>
+    </div>
+  </section>
 </main>
+
+<dialog id="trabajo-dialog" aria-labelledby="trabajo-dialog-titulo" aria-describedby="trabajo-dialog-contexto">
+  <form id="trabajo-form">
+    <h2 id="trabajo-dialog-titulo"></h2>
+    <p id="trabajo-dialog-contexto"></p>
+    <div id="trabajo-dialog-campos" class="grid"></div>
+    <p id="trabajo-dialog-error" class="form-error" role="alert"></p>
+    <p id="trabajo-dialog-estado" role="status" aria-live="polite"></p>
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <button type="button" class="btn btn-ghost" id="trabajo-dialog-cancelar">Cancelar</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Notificación tipo toast -->
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -308,8 +388,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"
         crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
+<script src="js/migraciones.js"></script>
 <script src="js/db.js"></script>
+<script src="js/trabajo.js"></script>
 <script src="js/proyectos.js"></script>
+<script src="js/tableros.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/app.js"></script>
 

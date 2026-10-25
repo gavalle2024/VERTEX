@@ -11,26 +11,6 @@
     'nombre', 'responsable', 'division', 'inicio', 'meta', 'fin', 'estado',
     'avance', 'implementacion', 'cumplimiento', 'objetivo', 'resultado', 'observaciones'
   ];
-  const DDL = `
-    CREATE TABLE IF NOT EXISTS proyectos (
-      id TEXT PRIMARY KEY,
-      nombre TEXT NOT NULL,
-      responsable TEXT NOT NULL,
-      division TEXT DEFAULT '',
-      inicio TEXT DEFAULT '',
-      meta TEXT DEFAULT '',
-      fin TEXT DEFAULT '',
-      estado TEXT DEFAULT 'En curso',
-      avance INTEGER DEFAULT 0,
-      implementacion TEXT DEFAULT 'No iniciado',
-      cumplimiento TEXT DEFAULT 'En curso (pendiente de evaluar)',
-      objetivo TEXT DEFAULT '',
-      resultado TEXT DEFAULT '',
-      observaciones TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
-    );
-  `;
 
   let _SQL = null;
   let _db = null;
@@ -39,6 +19,7 @@
   let _ocupado = false;
   let _error = '';
   let _avisoUbicacion = '';
+  let _migracion = null;
 
   function _estado() {
     return {
@@ -46,6 +27,8 @@
       tieneArchivo: !!_conexion,
       esperaPermiso: !!_pendiente,
       ocupado: _ocupado,
+      requiereMigracion: !!_migracion,
+      destinoMigracion: _migracion ? _migracion.conexion.archivo.name : '',
       ubicacion: _conexion
         ? (_conexion.carpeta ? _conexion.carpeta.name + ' / ' : '') + _conexion.archivo.name
         : '',
@@ -109,16 +92,18 @@
     }
   }
 
+  function _exportar(db) {
+    const data = db.export();
+    // sql.js reabre su conexión al exportar y restablece los pragmas.
+    db.run('PRAGMA foreign_keys=ON');
+    return data;
+  }
+
   function _crearDB(data) {
     const candidata = data.length ? new _SQL.Database(data) : new _SQL.Database();
     try {
-      const control = candidata.exec('PRAGMA quick_check');
-      if (control[0].values.some(row => row[0] !== 'ok')) {
-        throw new Error('La base de datos está dañada.');
-      }
-      candidata.run(DDL);
-      candidata.exec(`SELECT id,${CAMPOS.join(',')},created_at,updated_at FROM proyectos LIMIT 0`);
-      return candidata;
+      const requiereMigracion = window.PSA.Esquema.preparar(candidata, !data.length);
+      return { candidata, requiereMigracion };
     } catch (e) {
       candidata.close();
       throw new Error('Archivo SQLite inválido o esquema incompatible. No se modificó el archivo. ' + e.message);
@@ -128,17 +113,28 @@
   async function _activar(conexion) {
     const file = await conexion.archivo.getFile();
     const datos = new Uint8Array(await file.arrayBuffer());
-    const candidata = _crearDB(datos);
+    const { candidata, requiereMigracion } = _crearDB(datos);
+    if (requiereMigracion) {
+      candidata.close();
+      _migracion = { conexion, original: datos };
+      return false;
+    }
     try {
-      if (!datos.length) await _escribirArchivo(conexion.archivo, candidata.export());
+      if (!datos.length) await _escribirArchivo(conexion.archivo, _exportar(candidata));
     } catch (e) {
       candidata.close();
       throw e;
     }
+    await _publicarConexion(conexion, candidata);
+    return true;
+  }
+
+  async function _publicarConexion(conexion, candidata) {
     if (_db) _db.close();
     _db = candidata;
     _conexion = conexion;
     _pendiente = null;
+    _migracion = null;
     try {
       await _idbOperacion('readwrite', store => store.put(conexion, IDB_KEY));
       _avisoUbicacion = '';
@@ -187,8 +183,8 @@
     try {
       const conexion = await seleccionar();
       if (!conexion) return { ok: false, cancelado: true };
-      await _activar(conexion);
-      return { ok: true, nombre: conexion.archivo.name };
+      const activa = await _activar(conexion);
+      return { ok: activa, requiereMigracion: !activa, nombre: conexion.archivo.name };
     } catch (e) {
       if (e.name === 'AbortError') return { ok: false, cancelado: true };
       _registrarError(e);
@@ -244,6 +240,100 @@
     });
   }
 
+  function _iguales(a, b) {
+    return a.length === b.length && a.every((valor, i) => valor === b[i]);
+  }
+
+  async function _leerBinario(handle) {
+    return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+  }
+
+  async function _respaldar(solicitud, destino) {
+    if (!destino) {
+      const carpeta = solicitud.conexion.carpeta;
+      const nombre = 'vertex.pre-v1.' + Date.now() + '.' + Math.random().toString(36).slice(2, 10) + '.db';
+      try {
+        await carpeta.getFileHandle(nombre);
+        throw new Error('El nombre de respaldo ya existe. Reintente para generar otro nombre.');
+      } catch (e) {
+        if (e.name !== 'NotFoundError') throw e;
+      }
+      destino = await carpeta.getFileHandle(nombre, { create: true });
+    }
+    if (typeof destino.isSameEntry === 'function' && await destino.isSameEntry(solicitud.conexion.archivo)) {
+      throw new Error('El respaldo debe ser distinto de la base original.');
+    }
+    if ((await _leerBinario(destino)).length) {
+      throw new Error('El archivo de respaldo no está vacío. No se sobrescribió.');
+    }
+    await _escribirArchivo(destino, solicitud.original);
+    if (!_iguales(await _leerBinario(destino), solicitud.original)) {
+      throw new Error('No se pudo verificar el respaldo. La base original no se modificó.');
+    }
+    return destino.name;
+  }
+
+  async function migrarConexion() {
+    if (!_migracion) throw new Error('No hay una migración pendiente.');
+    _iniciarOperacion();
+    let candidata;
+    try {
+      const solicitud = _migracion;
+      // El selector alternativo se invoca antes de cualquier await para conservar el gesto del usuario.
+      const destino = solicitud.conexion.carpeta ? null : await window.showSaveFilePicker({
+        suggestedName: 'vertex.pre-v1.' + Date.now() + '.db',
+        types: [{ description: 'Respaldo SQLite anterior a la migración', accept: { 'application/octet-stream': ['.db'] } }]
+      });
+      candidata = new _SQL.Database(solicitud.original);
+      candidata.run('PRAGMA foreign_keys=ON');
+      window.PSA.Esquema.migrar(candidata);
+      if (!_iguales(await _leerBinario(solicitud.conexion.archivo), solicitud.original)) {
+        throw new Error('La base cambió desde que se solicitó la migración. Cancele y vuelva a seleccionarla.');
+      }
+      const respaldo = await _respaldar(solicitud, destino);
+      if (!_iguales(await _leerBinario(solicitud.conexion.archivo), solicitud.original)) {
+        throw new Error('La base cambió durante el respaldo. No se aplicó la migración.');
+      }
+      await _escribirArchivo(solicitud.conexion.archivo, _exportar(candidata));
+      await _publicarConexion(solicitud.conexion, candidata);
+      candidata = null;
+      return { ok: true, respaldo };
+    } catch (e) {
+      if (e.name === 'AbortError') return { ok: false, cancelado: true };
+      _registrarError(e);
+      throw e;
+    } finally {
+      if (candidata) candidata.close();
+      _finalizarOperacion();
+    }
+  }
+
+  function cancelarMigracion() {
+    if (_ocupado) throw new Error('Espere a que termine la operación en curso.');
+    _migracion = null;
+    _pendiente = null;
+    _error = '';
+    _notificar();
+  }
+
+  function _filas(db, sql, params = []) {
+    const statement = db.prepare(sql);
+    try {
+      statement.bind(params);
+      const filas = [];
+      while (statement.step()) filas.push(statement.getAsObject());
+      return filas;
+    } finally {
+      statement.free();
+    }
+  }
+
+  function consultar(sql, params = []) {
+    if (!_db) return [];
+    if (!/^\s*SELECT\b/i.test(sql)) throw new Error('La consulta debe ser de solo lectura.');
+    return _filas(_db, sql, params);
+  }
+
   function getProyectos() {
     if (!_db) return [];
     const res = _db.exec('SELECT * FROM proyectos ORDER BY inicio DESC, created_at DESC');
@@ -252,19 +342,36 @@
     return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])));
   }
 
-  async function _guardarCambio(sql, params) {
+  async function transaccion(operacion) {
     if (!_db || !_conexion) throw new Error('Conecte una base de datos antes de guardar.');
+    if (_migracion) throw new Error('Confirme o cancele la migración pendiente antes de guardar.');
     _iniciarOperacion();
     let candidata;
     try {
       // El estado visible solo cambia después de confirmar la escritura al disco.
-      candidata = new _SQL.Database(_db.export());
-      candidata.run(sql, params);
-      await _escribirArchivo(_conexion.archivo, candidata.export());
+      candidata = new _SQL.Database(_exportar(_db));
+      candidata.run('PRAGMA foreign_keys=ON');
+      candidata.run('BEGIN IMMEDIATE');
+      let resultado;
+      try {
+        resultado = operacion({
+          run(sql, params = []) { candidata.run(sql, params); return candidata.getRowsModified(); },
+          all(sql, params = []) { return _filas(candidata, sql, params); }
+        });
+        if (resultado && typeof resultado.then === 'function') {
+          throw new Error('La operación SQLite debe ser síncrona dentro de la transacción.');
+        }
+        window.PSA.Esquema.validar(candidata);
+      } catch (e) {
+        candidata.run('ROLLBACK');
+        throw e;
+      }
+      candidata.run('COMMIT');
+      await _escribirArchivo(_conexion.archivo, _exportar(candidata));
       _db.close();
       _db = candidata;
       candidata = null;
-      return true;
+      return resultado;
     } catch (e) {
       _registrarError(e);
       throw e;
@@ -272,6 +379,13 @@
       if (candidata) candidata.close();
       _finalizarOperacion();
     }
+  }
+
+  function _guardarCambio(sql, params) {
+    return transaccion(tx => {
+      if (!tx.run(sql, params)) throw new Error('El registro ya no existe. Actualice la vista.');
+      return true;
+    });
   }
 
   async function saveProyecto(p, esNuevo) {
@@ -286,14 +400,22 @@
   }
 
   async function deleteProyecto(id) {
-    return _guardarCambio('DELETE FROM proyectos WHERE id=?', [id]);
+    return transaccion(tx => {
+      const asociados = tx.all(`SELECT
+        (SELECT count(*) FROM tableros WHERE proyecto_id=?) +
+        (SELECT count(*) FROM actividad WHERE proyecto_id=?) AS cantidad`, [id, id])[0].cantidad;
+      if (asociados) throw new Error('El proyecto tiene tableros o actividad asociada. Archívelo para conservar su información.');
+      if (!tx.run('DELETE FROM proyectos WHERE id=?', [id])) throw new Error('El proyecto ya no existe.');
+      return true;
+    });
   }
 
   window.PSA = window.PSA || {};
   window.PSA.DB = {
-    init, configurarCarpeta, conectarArchivo, solicitarPermiso,
+    init, configurarCarpeta, conectarArchivo, solicitarPermiso, migrarConexion, cancelarMigracion,
+    consultar, transaccion,
     getProyectos, saveProyecto, deleteProyecto,
-    exportarDB() { return _db ? _db.export() : null; },
+    exportarDB() { return _db ? _exportar(_db) : null; },
     get estado() { return _estado(); },
     get useSQLite() { return !!_SQL; },
     get tieneArchivo() { return !!_conexion; },

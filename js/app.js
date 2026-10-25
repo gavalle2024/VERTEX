@@ -57,18 +57,35 @@ PSA.cambiarTab = function (viewId, btnOrKey) {
   } else if (btnOrKey && btnOrKey.classList) {
     btnOrKey.classList.add('active');
   }
+  document.querySelectorAll('nav.tabs button').forEach(b => {
+    b.setAttribute('aria-selected', String(b.classList.contains('active')));
+  });
 };
 
 /** Renderiza todos los módulos (tabla + dashboard). */
 PSA.renderTodo = function () {
   PSA.Proyectos.renderTabla();
   PSA.Dashboard.render();
+  PSA.Tableros.render();
 };
 
 /* ════════════════════════════════════════
    Atajos de teclado
    ════════════════════════════════════════ */
 document.addEventListener('keydown', function (e) {
+  if (PSA.DB.ocupado) return;
+  if (PSA.Tableros.editorAbierto) return;
+  if (PSA.DB.estado.requiereMigracion) {
+    const botones = Array.from(document.querySelectorAll('#migration-overlay button:not(:disabled)'));
+    if (e.key === 'Escape') { e.preventDefault(); PSA.cancelarMigracion(); }
+    if (e.key === 'Tab' && botones.length) {
+      const primero = botones[0];
+      const ultimo = botones[botones.length - 1];
+      if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+      if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+    }
+    return;
+  }
   if (e.key === 'Escape' && PSA.Proyectos && PSA.Proyectos.editandoId) {
     PSA.Proyectos.limpiarForm();
     PSA.toast('Edición cancelada (Esc).');
@@ -80,7 +97,7 @@ document.addEventListener('keydown', function (e) {
    ════════════════════════════════════════ */
 
 /** Actualiza el indicador de estado y controla el overlay de conexión a DB. */
-function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, ubicacion, error } = {}) {
+function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, ubicacion, error, requiereMigracion, destinoMigracion } = {}) {
   const statusEl  = document.getElementById('db-status');
   const btnEl     = document.getElementById('btn-db-connect');
   const overlayEl = document.getElementById('connect-overlay');
@@ -97,6 +114,27 @@ function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, 
     detalleEl.classList.toggle('db-warning', !!error);
   }
   if (carpetaBtn) carpetaBtn.classList.toggle('hidden', !useSQLite || !PSA.DB.hasFSA || !esperaPermiso);
+  const migracionEl = document.getElementById('migration-overlay');
+  const abrirMigracion = requiereMigracion && migracionEl.classList.contains('hidden');
+  const cerrarMigracion = !requiereMigracion && !migracionEl.classList.contains('hidden');
+  migracionEl.classList.toggle('hidden', !requiereMigracion);
+  document.querySelectorAll('main, header, nav.tabs').forEach(el => { el.inert = !!requiereMigracion; });
+  document.getElementById('v-tableros').inert = !!ocupado;
+  document.getElementById('v-tableros').setAttribute('aria-busy', String(!!ocupado));
+  PSA.Tableros.actualizarEstado();
+  if (requiereMigracion) {
+    if (overlayEl) overlayEl.classList.add('hidden');
+    document.getElementById('migration-msg').textContent = error ||
+      'La base ' + destinoMigracion + ' usa el esquema anterior. Requiere una migración a la versión ' + PSA.Esquema.VERSION + '.';
+    if (statusEl) { statusEl.textContent = '⚠ Actualización pendiente'; statusEl.className = 'db-warning'; }
+    if (abrirMigracion && !ocupado) document.getElementById('migration-confirm').focus();
+    if (!ocupado && !migracionEl.contains(document.activeElement)) document.getElementById('migration-confirm').focus();
+    return;
+  }
+  if (cerrarMigracion) {
+    const destinoFoco = tieneArchivo ? btnEl : ovBtnEl;
+    if (destinoFoco) setTimeout(() => destinoFoco.focus(), 0);
+  }
 
   if (ocupado && !useSQLite) {
     if (statusEl) statusEl.textContent = 'Iniciando SQLite…';
@@ -164,11 +202,34 @@ PSA.gestionarConexionDB = async function (elegirCarpeta = false) {
       : await PSA.DB.configurarCarpeta();
     if (resultado.ok) {
       PSA.Proyectos.limpiarForm();
+      PSA.Tableros.reiniciar();
       PSA.renderTodo();
       PSA.toast(PSA.DB.estado.error || 'Conectado a ' + PSA.DB.estado.ubicacion, PSA.DB.estado.error ? 'error' : undefined);
     }
   } catch (e) {
     PSA.toast('Error al conectar: ' + e.message, 'error');
+  }
+};
+
+PSA.confirmarMigracion = async function () {
+  if (PSA.DB.ocupado) return;
+  try {
+    const resultado = await PSA.DB.migrarConexion();
+    if (!resultado.ok) return;
+    PSA.Proyectos.limpiarForm();
+    PSA.Tableros.reiniciar();
+    PSA.renderTodo();
+    PSA.toast('Base actualizada. Respaldo: ' + resultado.respaldo);
+  } catch (e) {
+    PSA.toast('No se actualizó la base: ' + e.message, 'error');
+  }
+};
+
+PSA.cancelarMigracion = function () {
+  try {
+    PSA.DB.cancelarMigracion();
+  } catch (e) {
+    PSA.toast(e.message, 'error');
   }
 };
 

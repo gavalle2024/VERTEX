@@ -4,6 +4,96 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ---
 
+## [Sin publicar] — 2026-10-24
+
+### Kanban con arrastre y reordenamiento (fase 4) — 2026-10-25
+- El arrastre comienza únicamente en el control dedicado de cada tarjeta; los botones, casillas y selectores internos no inician una operación de arrastre.
+- Se puede insertar una tarjeta antes/después de otra o al final de una etapa del mismo tablero, y cambiar el orden dentro de su propia etapa. Las etapas activas se resaltan, la posición propuesta queda señalada con texto y estilos, y las etapas inválidas se rechazan.
+- El arrastre mueve siempre una sola tarjeta. Si el usuario tiene varias seleccionadas, el estado en vivo aclara que el arrastre no incluye a las demás; los controles explícitos de selección múltiple siguen disponibles.
+- Se reutiliza `PSA.Trabajo.moverTarjeta(id,destinoId,posicion)` para validar el tablero y persistir lista/posición de forma transaccional. No hay actualización optimista: se vuelve a renderizar solo después de la escritura confirmada; errores mantienen la vista original y permiten reintentar. No se modificó esquema ni persistencia.
+- Se añadieron controles **Subir/Bajar en la etapa** como alternativa de teclado para reordenar; los botones existentes siguen moviendo entre etapas.
+- Prueba de navegador aislada con SQLite y archivo sintéticos: `probarArrastreTarjetas()` aprobó **25 comprobaciones**; reabrir el binario sintético conservó ubicaciones, posiciones y orden. Los eventos DragEvent se dispararon en Chromium; no se simularon interacciones físicas ni soporte táctil.
+- Regresión de interfaz de fase 3: **42 comprobaciones** de tablero y **26 de movimiento** aprobadas. Diseño responsive: **15 comprobaciones** (cinco por ancho a 390, 768 y 1280 px).
+- La automatización de puntero disponible generó inicio/final de arrastre pero no eventos de entrada/soltado; no se cuenta como prueba de arrastre físico. Se verificó el flujo de eventos DnD de forma automatizada en Chromium y queda recomendada la aceptación manual con ratón en el navegador de destino.
+- Node: `node --test --test-reporter=spec tests\db.test.cjs`: **31 aprobadas, 0 fallidas**. Sintaxis JS y `git diff --check` sin errores.
+- La base habitual mantuvo SHA-256 `FBF10EBEDBCAC4203A8190DB97F8EEF2F8E733AD3326C91F662AC9E4A4974020`, idéntico al valor inicial; las pruebas usaron únicamente bases sintéticas.
+- Se actualizaron README, convenciones de AGENTS y la documentación de arquitectura, evolución y contrato/límites de persistencia. Sin paquetes, escritura a la base habitual, commits ni operaciones remotas.
+
+### Corrección del movimiento de tarjetas — 2026-10-25
+- Causa: la API persistente existente `moverTarjeta(id,destino,posicion)` ya era individual, pero la UI no la exponía. Los controles **Anterior / Siguiente** de las columnas reordenaban la lista completa; como todas las tarjetas pertenecen a esa lista, se desplazaban visualmente juntas sin cambiar sus asociaciones. Se distinguió ahora el orden de columna del traslado de tarjeta.
+- Cada tarjeta ofrece etapa anterior/siguiente y destino específico; cada operación recibe únicamente el ID elegido. Los límites muestran un error claro y no cambian datos.
+- Casillas por tarjeta y **Seleccionar todas en esta etapa** agregan selección múltiple con indicador de cantidad, botones para movimiento relativo individualizado o destino común, y **Cancelar selección**. El foco y la indicación escrita hacen la selección evidente además del color.
+- Nueva API `PSA.Trabajo.moverTarjetas([{id,destinoId},...])`: rechaza lotes vacíos/duplicados, tarjetas archivadas, listas inactivas o combinaciones de tableros; valida todo antes de escribir; actualiza lista, completitud, actividad y posiciones contiguas en una transacción. El orden de entrada determina el relativo de las movidas; la interfaz envía los IDs en orden visual. Las restantes conservan orden y etapa.
+- Errores de persistencia no publican movimientos parciales ni limpian la selección; al reintentar se persiste el lote completo. Al completar el movimiento, se actualiza el tablero y se deseleccionan los elementos.
+- Pruebas Node: **31 aprobadas, 0 fallidas** (4 nuevas: movimiento individual/reapertura, lote y orden, validación de límites/tablero/vacío, fallo atómico/reintento).
+- Navegador con SQLite/binario e IndexedDB simulados: **26 comprobaciones de movimiento aprobadas** y una comprobación de reapertura tras recargar, incluyendo las etapas límite, selección/deselección individual, selección por etapa, movimiento relativo en ambas direcciones, destino específico, posiciones y orden de seleccionadas/no seleccionadas, fallo sin cambios parciales y reintento.
+- Diseño de los nuevos controles comprobado a 390, 768 y 1280 px: sin desborde horizontal de página/tarjeta y con desplazamiento horizontal limitado al Kanban.
+- Se preservó `moverTarjeta` y su contrato, se agregó el método por lote sin tocar esquema, migraciones ni `db.js`. Sin dependencias, commits, operaciones remotas ni escrituras de prueba a la base habitual.
+- Actualizados README, instrucciones de agentes, arquitectura, API/límites de persistencia y estado de la evolución visual.
+
+### Tableros, listas y tarjetas (fase 3)
+- Nuevo `js/tableros.js`: catálogo filtrado por proyecto real, creación/consulta/edición de tableros, apertura del detalle, archivo y restauración.
+- Kanban básico con listas en columnas, nombres personalizados y categoría funcional independiente. Creación/renombre, archivo/restauración y orden persistente con **Anterior / Siguiente**. Las cinco listas iniciales se crean mediante la API ya existente, sin duplicar esa lógica.
+- Tarjetas con título, descripción, responsable del catálogo existente, prioridad, inicio/vencimiento, observaciones y marca explícita de completada. Consulta y edición desde su título; archivo/restauración con protección de contenedores.
+- `index.html`: pestaña Tableros, catálogo/detalle y un único `<dialog>` para las tres entidades. Reutiliza campos, botones, utilidades de escape y notificaciones; no hay componentes o persistencias paralelas.
+- `js/app.js`: integración en `renderTodo`, selección ARIA de pestañas, ocupación global, convivencia con Esc histórico y reinicio de selección solo tras cambiar de base con éxito.
+- `js/proyectos.js`: botón Tableros por proyecto; eventos DOM para acciones de fila sin interpolar identificadores en JavaScript. El CRUD, filtros, dashboard y exportaciones históricos se conservan.
+- `css/styles.css`: catálogo adaptable, desplazamiento horizontal limitado a columnas, prioridad/vencimiento/completitud, diálogo móvil, texto largo sin desbordes, controles de selección e impresión.
+- Reutilizadas exclusivamente `PSA.DB.getProyectos` y `PSA.Trabajo.getTableros/getListas/getTarjetas/getResponsables`, `guardarTablero/guardarLista/guardarTarjeta`, `reordenarListas` y `archivar`. Sus transacciones ya registran actividad y confirman escritura antes de publicar.
+- Errores de guardado visibles y registrados; el diálogo conserva los valores para reintentar. No se notifica éxito ni se cierra antes de confirmar el archivo. Archivo confirmado explícitamente, consulta de archivados en solo lectura, protección de categoría con tarjetas y de la relación tablero/proyecto.
+- Foco contenido por el diálogo nativo, Esc/Cancelar con confirmación de descarte, retorno de foco tras cerrar o renderizar; bloqueo durante operaciones.
+- Sin cambios de fase 3 en `js/db.js`, `js/trabajo.js` ni `js/migraciones.js`: el esquema y las APIs de fase 2 resultaron suficientes. No se repiten migraciones.
+
+### Verificación de fase 3
+- `node --test --test-reporter=spec tests\db.test.cjs`: **27 pruebas aprobadas, 0 fallidas**. Se suman tres regresiones de edición/reapertura, validación sin escrituras y error de cierre/reintento de entidades, además de las 24 existentes.
+- `tests/tableros.browser.js`: **42 comprobaciones DOM aprobadas**, con SQLite real y archivos/IndexedDB sintéticos. Incluye proyecto → tablero, listas iniciales/libres, edición/orden, tarjeta con asociaciones y fechas, validación, escape HTML, cierre retrasado, error de disco/reintento, archivo/restauración, estados vacíos y funciones históricas.
+- **6 comprobaciones de reapertura aprobadas** después de recargar realmente la página y reconectar el binario sintético: tablero, tarjeta, relaciones, orden, reconstrucción del Kanban y responsable histórico. No se utiliza memoria de entidades de la sesión anterior.
+- **15 comprobaciones de diseño aprobadas**: cinco a cada ancho de 390, 768 y 1280 px. Nombres sin espacios de 200 caracteres, ausencia de desborde global, desplazamiento de columnas, diálogo/grilla adaptables y checkbox sin ancho mínimo heredado. Se detectó y corrigió un desborde del título largo antes de la verificación final.
+- **4 comprobaciones de cambio de base aprobadas**: cancelación y base inválida conservan selección/detalle; cambio confirmado limpia la vista; volver a la original recupera sus entidades sin mezclarlas. Total del script en navegador: **67 comprobaciones aprobadas**.
+- **3 comprobaciones adicionales de teclado aprobadas** con teclas del navegador: Shift+Tab contenido, cancelar el descarte con Esc y confirmar el descarte con retorno de foco. No se confunden eventos DOM de la suite con clics manuales del usuario.
+- Sintaxis comprobada con `node --check` para los siete módulos y los scripts de pruebas; revisión con `git diff --check`.
+- La base habitual conserva SHA256 `9C69B209410341D5432FDE811EC29F17C3404DF2B2F1A0A55C60B572146A1BBC`, idéntico al inicio de esta fase. No se inicializó ni escribió durante las pruebas.
+- No se instalaron dependencias, no se crearon commits ni se realizaron operaciones remotas. Los permisos/selectores reales del sistema operativo siguen requiriendo validación manual.
+- Actualizados `AGENTS.md`, `README.md`, `docs/arquitectura.md`, `docs/evolucion-visual.md`, `docs/migraciones.md` y este registro, con flujos, APIs, alcance e instrucciones de prueba.
+
+### Límites y siguiente fase
+- La fase 4 incorpora arrastre individual y reordenamiento; la selección múltiple conserva acciones explícitas y no se arrastra como conjunto. El soporte táctil sigue pendiente y se recomienda validar el gesto físico de ratón en el navegador de destino.
+- No hay gestión de responsables ni etiquetas, Mis tareas, calendario, historial visual o dashboard de tareas. Seleccionar un responsable existente no crea identidades ni interpreta automáticamente textos históricos.
+- El pedido específico de fase 3 mantiene el formulario histórico de proyectos: no expone todavía sus campos aditivos, archivo/asignación ni nuevos eventos de creación/edición. No se declara completa esa parte del plan inicial más amplio.
+- Mantener una sola instancia escritora y respaldo periódico. No se agregó backend, sincronización ni sustitución por localStorage.
+
+### Migraciones y persistencia relacional (fase 2)
+- Modelo y procedimiento de respaldo/migración aprobados por el usuario después del análisis.
+- Nuevo `js/migraciones.js`: esquema SQLite 1, migración aditiva 0 → 1, comprobación de versión, integridad, columnas, índices, FK y conservación de todos los valores históricos.
+- Nuevas tablas de responsables, tableros, listas, tarjetas, etiquetas, asociaciones y actividad. Campos aditivos en proyectos sin reinterpretar los existentes.
+- `js/db.js`: consentimiento explícito, respaldo binario exacto y verificado antes de escribir, detección de cambios externos, rechazo de versiones futuras y conservación de conexión previa ante cancelación o error.
+- `PSA.DB.transaccion()` habilita mutaciones compuestas sobre candidata, con rollback, FK y escritura confirmada. Las FK se vuelven a habilitar después de exportar, porque sql.js reinicia pragmas al reabrir su conexión.
+- Nuevo `js/trabajo.js`: APIs para entidades, asignación explícita de responsables, etiquetas, archivo/restauración, orden de listas y movimiento de tarjetas. Los eventos se escriben con su mutación, actor Instalación local y fecha real.
+- `index.html` y `js/app.js`: confirmación de actualización, cancelación, foco, contención de teclado y fondo inerte durante el diálogo. No se agregan menús vacíos.
+- La eliminación de un proyecto con tableros o actividad se rechaza con indicación de archivar, sin cascadas destructivas.
+- `docs/migraciones.md`: procedimiento de respaldo/recuperación, modelo, APIs y límites. Actualizados README, AGENTS, arquitectura y estado de evolución.
+
+### Alcance pendiente al cerrar la fase 2
+- Las fases 3 a 8 aún no están implementadas como experiencia de usuario: formularios ampliados, tableros, tarjetas, Kanban, Mis tareas, calendario, búsqueda de tareas, vista de actividad y dashboard de tareas.
+- El formulario histórico de proyectos conserva su comportamiento; la integración de sus eventos de creación/edición y los nuevos campos corresponde a la fase 3.
+- No se modificó ni migró la base habitual, no se instalaron dependencias, no se crearon commits ni se sincronizaron remotos.
+
+### Verificación de fase 2
+- Resultado final: 24 pruebas aprobadas, 0 fallidas; comprobación de sintaxis de los seis módulos JavaScript.
+- Regresión ampliada con SQL real y archivos simulados: legado conservado, respaldo exacto, fallos de respaldo/cierre, cancelación, rollback, versión futura, cambios externos, FK, entidades, asignaciones, etiquetas, orden, archivo y actividad.
+- Flujo de navegador con base sintética: solicitud de consentimiento, diálogo, fondo inerte, cancelación sin escrituras, respaldo verificado, migración confirmada y renderizado de proyectos históricos.
+- Los selectores y permisos del sistema operativo no se automatizan: requieren aprobación manual. No se usó la base habitual para comprobar escritura.
+
+### Análisis de evolución visual (fase 1)
+- Lectura de documentación, HTML, módulos, estilos, pruebas y configuración, con inspección de esquema en memoria sin modificar la base original.
+- Confirmado `PRAGMA user_version=0`, tabla única `proyectos` y ausencia de entidades de gestión visual.
+- Añadido `docs/evolucion-visual.md` con matriz de brechas de ocho columnas, modelo relacional aditivo propuesto, decisiones de compatibilidad, procedimiento de migración/respaldo y plan por fases.
+- Enlaces y estado de la propuesta actualizados en `AGENTS.md`, `README.md` y `docs/arquitectura.md`.
+- Línea base ejecutada: 10 pruebas aprobadas y sintaxis correcta en los cuatro módulos JavaScript.
+- Al concluir el análisis no se habían modificado funcionalidades ni datos. Después de la aprobación se implementó la fase 2 descrita arriba.
+
+---
+
 ## [2.4.0] — 2026-10-23
 
 ### Añadido

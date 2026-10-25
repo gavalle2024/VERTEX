@@ -8,6 +8,8 @@ const vm = require('node:vm');
 
 let SQL;
 const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'db.js'), 'utf8');
+const migraciones = fs.readFileSync(path.join(__dirname, '..', 'js', 'migraciones.js'), 'utf8');
+const trabajoSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'trabajo.js'), 'utf8');
 const proyecto = {
   id: 'p1', nombre: 'Prueba', responsable: 'Responsable', division: 'URSA',
   inicio: '2026-10-23', meta: '', fin: '', estado: 'En curso', avance: 25,
@@ -58,9 +60,19 @@ function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
 
 function carpeta(file = archivo()) {
   return {
-    kind: 'directory', name: 'Datos PSA', file, creaciones: 0,
+    kind: 'directory', name: 'Datos PSA', file, creaciones: 0, respaldos: new Map(),
     async getFileHandle(nombre, options) {
-      assert.equal(nombre, 'vertex.db');
+      if (nombre !== 'vertex.db') {
+        if (this.respaldos.has(nombre)) return this.respaldos.get(nombre);
+        if (options && options.create) {
+          const respaldo = archivo(nombre);
+          this.respaldos.set(nombre, respaldo);
+          return respaldo;
+        }
+        const e = new Error('No existe');
+        e.name = 'NotFoundError';
+        throw e;
+      }
       if (!this.file) {
         if (!options || !options.create) {
           const e = new Error('No existe');
@@ -129,10 +141,15 @@ function entorno(guardado, opciones = {}) {
       if (opciones.sqlError) throw new Error('Motor no disponible');
       return SQL;
     },
+    Date,
     CustomEvent: class { constructor(type, data) { this.type = type; this.detail = data.detail; } }
   });
+  vm.runInContext(migraciones, context);
   vm.runInContext(source, context);
-  return { db: window.PSA.DB, window, store, eventos };
+  let secuencia = 0;
+  window.PSA.genId = () => 'nuevo-' + (++secuencia);
+  vm.runInContext(trabajoSource, context);
+  return { db: window.PSA.DB, trabajo: window.PSA.Trabajo, esquema: window.PSA.Esquema, window, store, eventos };
 }
 
 test('crea SQLite real, guarda, edita, elimina y restaura entre sesiones', async () => {
@@ -290,6 +307,13 @@ test('abre una copia de la base inicial del proyecto sin modificar el archivo or
   const file = archivo('vertex.db', new Uint8Array(original));
   const app = entorno(file);
   await app.db.init();
+  if (app.db.estado.requiereMigracion) {
+    assert.equal(app.db.tieneArchivo, false);
+    assert.equal(file.escrituras, 0);
+    assert.deepEqual(Buffer.from(file.datos), original);
+    assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'db', 'vertex.db')), original);
+    return;
+  }
   assert.equal(app.db.tieneArchivo, true);
   assert.ok(Array.isArray(app.db.getProyectos()));
   assert.equal(file.escrituras, original.length ? 0 : 1);
@@ -314,4 +338,501 @@ test('cambiar a una base existente no mezcla datos ni modifica la base anterior'
   assert.equal(primera.db.getProyectos().length, 1);
   assert.equal(primera.db.getProyectos()[0].id, 'p2');
   assert.deepEqual(archivoAnterior.datos, bytesAnteriores);
+});
+
+function baseLegacy() {
+  const db = new SQL.Database();
+  db.run(`CREATE TABLE proyectos (
+    id TEXT PRIMARY KEY,nombre TEXT NOT NULL,responsable TEXT NOT NULL,division TEXT,
+    inicio TEXT,meta TEXT,fin TEXT,estado TEXT,avance INTEGER,implementacion TEXT,
+    cumplimiento TEXT,objetivo TEXT,resultado TEXT,observaciones TEXT,created_at TEXT,updated_at TEXT
+  )`);
+  db.run('INSERT INTO proyectos VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+    'historico', "Proyecto histórico O'Brien", 'Responsable original', null, '2026-01-01',
+    '', '', 'En curso', 0, 'No iniciado', 'En curso (pendiente de evaluar)',
+    '<strong>Texto, no HTML</strong>', '', 'Acentos: áéíóú', '2026-01-01 10:30:00', '2026-01-02 14:00:00'
+  ]);
+  const bytes = db.export();
+  db.close();
+  return bytes;
+}
+
+async function entornoNuevo() {
+  const app = entorno();
+  await app.db.init();
+  await app.db.configurarCarpeta();
+  return app;
+}
+
+async function solicitarMigracion(app, bytes = baseLegacy()) {
+  const destino = carpeta(archivo('vertex.db', bytes.slice()));
+  app.window.seleccion = destino;
+  const resultado = await app.db.configurarCarpeta();
+  assert.equal(resultado.requiereMigracion, true);
+  assert.equal(destino.file.escrituras, 0);
+  return destino;
+}
+
+test('migración con consentimiento, respaldo exacto, campos históricos intactos e idempotencia', async () => {
+  const app = await entornoNuevo();
+  const bytes = baseLegacy();
+  const previo = new SQL.Database(bytes);
+  const valores = previo.exec('SELECT * FROM proyectos');
+  previo.close();
+  const destino = await solicitarMigracion(app, bytes);
+  assert.equal(app.db.estado.requiereMigracion, true);
+  const resultado = await app.db.migrarConexion();
+  assert.equal(resultado.ok, true);
+  assert.ok(resultado.respaldo.startsWith('vertex.pre-v1.'));
+  assert.deepEqual(Buffer.from(destino.respaldos.get(resultado.respaldo).datos), Buffer.from(bytes));
+  assert.equal(destino.file.escrituras, 1);
+  const migrada = new SQL.Database(destino.file.datos);
+  const columnas = valores[0].columns.join(',');
+  assert.deepEqual(migrada.exec(`SELECT ${columnas} FROM proyectos`), valores);
+  assert.equal(migrada.exec('PRAGMA user_version')[0].values[0][0], 1);
+  assert.equal(migrada.exec('SELECT count(*) FROM responsables')[0].values[0][0], 0);
+  assert.equal(migrada.exec('SELECT count(*) FROM actividad')[0].values[0][0], 0);
+  assert.equal(migrada.exec('SELECT prioridad,archivado,responsable_id,descripcion FROM proyectos')[0].values[0][0], 'Media');
+  migrada.close();
+  const reapertura = entorno(app.store.get('vertex_db'));
+  await reapertura.db.init();
+  assert.equal(reapertura.db.estado.requiereMigracion, false);
+  assert.equal(reapertura.db.getProyectos()[0].id, 'historico');
+  assert.equal(destino.file.escrituras, 1);
+});
+
+test('cancelar migración conserva conexión previa y no escribe ni crea respaldos', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const destino = await solicitarMigracion(app);
+  await assert.rejects(app.db.saveProyecto({ ...proyecto, nombre: 'Cambio' }, false), /migración pendiente/);
+  app.db.cancelarMigracion();
+  assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+  assert.equal(app.db.estado.requiereMigracion, false);
+  assert.equal(destino.respaldos.size, 0);
+  assert.equal(destino.file.escrituras, 0);
+});
+
+test('respaldo fallido o no verificable no migra el archivo original', async () => {
+  for (const tipo of ['write', 'verify']) {
+    const app = await entornoNuevo();
+    const bytes = baseLegacy();
+    const destino = await solicitarMigracion(app, bytes);
+    const get = destino.getFileHandle.bind(destino);
+    destino.getFileHandle = async (nombre, options) => {
+      const file = await get(nombre, options);
+      if (nombre !== 'vertex.db' && options && options.create) {
+        if (tipo === 'write') file.fallo = true;
+        else {
+          file.createWritable = async () => ({ async write() {}, async close() {}, async abort() {} });
+        }
+      }
+      return file;
+    };
+    await assert.rejects(app.db.migrarConexion(), /Disco sin espacio|verificar el respaldo/);
+    assert.equal(destino.file.escrituras, 0);
+    assert.deepEqual(destino.file.datos, bytes);
+    assert.equal(app.db.estado.requiereMigracion, true);
+  }
+});
+
+test('fallo de escritura migrada conserva original y conexión; permite reintentar con otro respaldo', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const bytes = baseLegacy();
+  const destino = await solicitarMigracion(app, bytes);
+  destino.file.falloCierre = true;
+  await assert.rejects(app.db.migrarConexion(), /cerrar el archivo/);
+  assert.deepEqual(destino.file.datos, bytes);
+  assert.equal(app.db.getProyectos()[0].id, 'p1');
+  assert.equal(destino.respaldos.size, 1);
+  destino.file.falloCierre = false;
+  await app.db.migrarConexion();
+  assert.equal(app.db.getProyectos()[0].id, 'historico');
+  assert.equal(destino.respaldos.size, 2);
+  for (const file of destino.respaldos.values()) assert.deepEqual(Buffer.from(file.datos), Buffer.from(bytes));
+});
+
+test('versión futura, esquema ajeno y cambio externo se rechazan sin escribir', async () => {
+  const app = await entornoNuevo();
+  const futura = new SQL.Database(app.db.exportarDB());
+  futura.run('PRAGMA user_version=99');
+  const datosFuturos = futura.export();
+  futura.close();
+  app.window.seleccion = carpeta(archivo('vertex.db', datosFuturos));
+  await assert.rejects(app.db.configurarCarpeta(), /versión/);
+  assert.equal(app.window.seleccion.file.escrituras, 0);
+  const ajena = new SQL.Database(baseLegacy());
+  ajena.run('CREATE TABLE otra_aplicacion (id TEXT)');
+  app.window.seleccion = carpeta(archivo('vertex.db', ajena.export()));
+  ajena.close();
+  await assert.rejects(app.db.configurarCarpeta(), /tablas ajenas/);
+  assert.equal(app.window.seleccion.file.escrituras, 0);
+  const destino = await solicitarMigracion(app);
+  destino.file.datos = baseLegacy().slice(0, 30);
+  await assert.rejects(app.db.migrarConexion(), /cambió/);
+  assert.equal(destino.file.escrituras, 0);
+  assert.equal(destino.respaldos.size, 0);
+});
+
+test('handle antiguo requiere respaldo distinto; cancelar selector no cambia datos', async () => {
+  const bytes = baseLegacy();
+  const file = archivo('vertex.db', bytes.slice());
+  const app = entorno(file);
+  await app.db.init();
+  assert.equal(app.db.estado.requiereMigracion, true);
+  const cancelado = new Error('Cancelado'); cancelado.name = 'AbortError';
+  app.window.showSaveFilePicker = async () => { throw cancelado; };
+  assert.equal((await app.db.migrarConexion()).cancelado, true);
+  assert.equal(file.escrituras, 0);
+  file.isSameEntry = async otro => otro === file;
+  app.window.showSaveFilePicker = async () => file;
+  await assert.rejects(app.db.migrarConexion(), /distinto/);
+  const respaldo = archivo('respaldo.db');
+  app.window.showSaveFilePicker = async () => respaldo;
+  await app.db.migrarConexion();
+  assert.deepEqual(Buffer.from(respaldo.datos), Buffer.from(bytes));
+  assert.equal(app.db.tieneArchivo, true);
+});
+
+test('rollback de migración restaura versión y esquema ante un error SQL', () => {
+  const app = entorno();
+  const db = new SQL.Database(baseLegacy());
+  db.run('PRAGMA foreign_keys=ON');
+  const runOriginal = db.run.bind(db);
+  db.run = (sql, params) => {
+    if (sql.includes('CREATE TABLE responsables')) {
+      runOriginal('ALTER TABLE proyectos ADD COLUMN temporal TEXT');
+      throw new Error('Fallo SQL simulado');
+    }
+    return runOriginal(sql, params);
+  };
+  assert.throws(() => app.esquema.migrar(db), /Fallo SQL simulado/);
+  assert.equal(db.exec('PRAGMA user_version')[0].values[0][0], 0);
+  assert.equal(db.exec('PRAGMA table_info(proyectos)')[0].values.some(row => row[1] === 'temporal'), false);
+  assert.equal(db.exec('SELECT nombre FROM proyectos')[0].values[0][0], "Proyecto histórico O'Brien");
+  db.close();
+});
+
+test('API relacional crea entidades, asignaciones, etiquetas y actividad confirmada', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const responsable = await app.trabajo.guardarResponsable({ nombre: 'Persona local' });
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Operaciones' });
+  const listas = app.trabajo.getListas(tablero);
+  assert.equal(listas.length, 5);
+  const etiqueta = await app.trabajo.guardarEtiqueta({ nombre: '<script>texto</script>', color: '#336699' });
+  const tarjeta = await app.trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: "Tarea O'Brien <img>", responsable_id: responsable,
+    prioridad: 'Alta', inicio: '2026-10-24', vencimiento: '2026-10-30', etiquetas: [etiqueta, etiqueta]
+  });
+  assert.equal(app.trabajo.getTarjetaEtiquetas(tarjeta).length, 1);
+  assert.equal(app.trabajo.getTarjetas()[0].responsable_nombre, 'Persona local');
+  await app.trabajo.guardarTarjeta({ id: tarjeta, prioridad: 'Urgente', completada: 1 });
+  assert.equal(app.trabajo.getTarjetas()[0].completada, 1);
+  const tipos = app.trabajo.getActividad().map(e => e.tipo);
+  assert.ok(tipos.includes('prioridad_cambiada'));
+  assert.ok(tipos.includes('tarea_completada'));
+  assert.ok(app.trabajo.getActividad().every(e => e.actor === 'Instalación local' && /Z$/.test(e.created_at)));
+  const nuevo = entorno(app.store.get('vertex_db'));
+  await nuevo.db.init();
+  assert.equal(nuevo.trabajo.getTarjetas()[0].titulo, "Tarea O'Brien <img>");
+  assert.equal(nuevo.trabajo.getTarjetaEtiquetas(tarjeta).length, 1);
+});
+
+test('FK y restricciones se aplican tras clonar/exportar y protegen relaciones', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  app.db.exportarDB();
+  await assert.rejects(app.db.deleteProyecto('p1'), /Archívelo/);
+  await assert.rejects(app.db.transaccion(tx => tx.run(
+    'INSERT INTO tableros (id,proyecto_id,nombre) VALUES (?,?,?)', ['huerfano', 'no-existe', 'No válido'])), /FOREIGN KEY/);
+  await assert.rejects(app.db.transaccion(tx => tx.run(
+    'UPDATE proyectos SET prioridad=? WHERE id=?', ['Incorrecta', 'p1'])), /CHECK/);
+  assert.equal(app.trabajo.getTableros().length, 1);
+});
+
+test('movimiento y reordenamiento son atómicos, persistentes y no duplican tarjetas', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const listas = app.trabajo.getListas(tablero);
+  const primera = await app.trabajo.guardarTarjeta({ lista_id: listas[0].id, titulo: 'Primera' });
+  const segunda = await app.trabajo.guardarTarjeta({ lista_id: listas[0].id, titulo: 'Segunda' });
+  await app.trabajo.moverTarjeta(segunda, listas[0].id, 0);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas(), t => t.id), [segunda, primera]);
+  await app.trabajo.moverTarjeta(primera, listas[4].id, 0);
+  assert.equal(app.trabajo.getTarjetas().find(t => t.id === primera).completada, 1);
+  await app.trabajo.moverTarjeta(primera, listas[1].id, 0);
+  assert.equal(app.trabajo.getTarjetas().find(t => t.id === primera).completada, 0);
+  const invertidas = Array.from(listas, l => l.id).reverse();
+  await app.trabajo.reordenarListas(tablero, invertidas);
+  const nueva = entorno(app.store.get('vertex_db'));
+  await nueva.db.init();
+  assert.deepEqual(Array.from(nueva.trabajo.getListas(tablero), l => l.id), invertidas);
+  assert.equal(nueva.trabajo.getTarjetas().length, 2);
+  const actividad = nueva.trabajo.getActividad().length;
+  const file = app.window.seleccion.file;
+  file.fallo = true;
+  await assert.rejects(app.trabajo.moverTarjeta(segunda, listas[4].id, 0), /Disco sin espacio/);
+  assert.equal(app.trabajo.getTarjetas().find(t => t.id === segunda).lista_id, listas[0].id);
+  assert.equal(app.trabajo.getActividad().length, actividad);
+});
+
+test('mover una tarjeta conserva las demás y el orden de origen/destino después de reabrir', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const [origen, destino] = app.trabajo.getListas(tablero);
+  const ids = [];
+  for (const titulo of ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco']) {
+    ids.push(await app.trabajo.guardarTarjeta({ lista_id: origen.id, titulo }));
+  }
+  const previas = [];
+  for (const titulo of ['Destino 1', 'Destino 2']) {
+    previas.push(await app.trabajo.guardarTarjeta({ lista_id: destino.id, titulo }));
+  }
+  await app.trabajo.moverTarjeta(ids[2], destino.id, 1);
+  const origenActual = Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === origen.id), t => t.id);
+  const destinoActual = Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === destino.id), t => t.id);
+  assert.deepEqual(origenActual, [ids[0], ids[1], ids[3], ids[4]]);
+  assert.deepEqual(destinoActual, [previas[0], ids[2], previas[1]]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === origen.id), t => t.posicion), [0, 1, 3, 4]);
+  const reabierta = entorno(app.store.get('vertex_db'));
+  await reabierta.db.init();
+  assert.deepEqual(Array.from(reabierta.trabajo.getTarjetas().filter(t => t.lista_id === origen.id), t => t.id), origenActual);
+  assert.deepEqual(Array.from(reabierta.trabajo.getTarjetas().filter(t => t.lista_id === destino.id), t => t.id), destinoActual);
+});
+
+test('mover varias tarjetas seleccionadas conserva su orden relativo y deja intactos los demás', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const [origen, destino] = app.trabajo.getListas(tablero);
+  const ids = [];
+  for (const titulo of ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco']) {
+    ids.push(await app.trabajo.guardarTarjeta({ lista_id: origen.id, titulo }));
+  }
+  const previas = [];
+  for (const titulo of ['Destino 1', 'Destino 2']) {
+    previas.push(await app.trabajo.guardarTarjeta({ lista_id: destino.id, titulo }));
+  }
+  const archivada = await app.trabajo.guardarTarjeta({ lista_id: destino.id, titulo: 'Archivada' });
+  await app.trabajo.archivar('tarjeta', archivada, true);
+  await app.trabajo.moverTarjetas([
+    { id: ids[1], destinoId: destino.id },
+    { id: ids[3], destinoId: destino.id }
+  ]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === origen.id), t => t.id),
+    [ids[0], ids[2], ids[4]]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === destino.id && !t.archivada), t => t.id),
+    [...previas, ids[1], ids[3]]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === origen.id), t => t.posicion), [0, 2, 4]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas().filter(t => t.lista_id === destino.id && !t.archivada), t => t.posicion), [0, 1, 3, 4]);
+  assert.equal(app.trabajo.getTarjetas().find(t => t.id === archivada).posicion, 2);
+  await app.trabajo.moverTarjeta(ids[0], destino.id, 0);
+  const destinoConInsercion = app.trabajo.getTarjetas().filter(t => t.lista_id === destino.id);
+  assert.deepEqual(Array.from(destinoConInsercion, t => t.posicion), [0, 1, 2, 3, 4, 5]);
+  assert.equal(destinoConInsercion.at(-1).id, archivada);
+});
+
+test('movimiento múltiple entre etapas relativas, vacío e intertablero valida antes de escribir', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const otroTablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Otro tablero' });
+  const listas = app.trabajo.getListas(tablero);
+  const listasOtro = app.trabajo.getListas(otroTablero);
+  const primera = await app.trabajo.guardarTarjeta({ lista_id: listas[0].id, titulo: 'Primera' });
+  const segunda = await app.trabajo.guardarTarjeta({ lista_id: listas[1].id, titulo: 'Segunda' });
+  const ajena = await app.trabajo.guardarTarjeta({ lista_id: listasOtro[0].id, titulo: 'Ajena' });
+  await app.trabajo.moverTarjetas([
+    { id: primera, destinoId: listas[1].id },
+    { id: segunda, destinoId: listas[2].id }
+  ]);
+  const datos = app.trabajo.getTarjetas();
+  assert.equal(datos.find(t => t.id === primera).lista_id, listas[1].id);
+  assert.equal(datos.find(t => t.id === segunda).lista_id, listas[2].id);
+  assert.equal(datos.find(t => t.id === ajena).lista_id, listasOtro[0].id);
+  const binario = app.db.exportarDB();
+  const eventos = app.trabajo.getActividad().length;
+  await assert.rejects(app.trabajo.moverTarjetas([]), /Seleccione/);
+  await assert.rejects(app.trabajo.moverTarjetas([
+    { id: primera, destinoId: listas[3].id },
+    { id: ajena, destinoId: listasOtro[1].id }
+  ]), /mismo tablero/);
+  await assert.rejects(app.trabajo.moverTarjetas([
+    { id: primera, destinoId: listasOtro[1].id }
+  ]), /mismo tablero/);
+  assert.deepEqual(app.db.exportarDB(), binario);
+  assert.equal(app.trabajo.getActividad().length, eventos);
+});
+
+test('fallo de escritura en movimiento múltiple descarta todos los cambios y permite reintento', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const [origen, destino] = app.trabajo.getListas(tablero);
+  const uno = await app.trabajo.guardarTarjeta({ lista_id: origen.id, titulo: 'Uno' });
+  const dos = await app.trabajo.guardarTarjeta({ lista_id: origen.id, titulo: 'Dos' });
+  const binario = app.db.exportarDB();
+  const eventos = app.trabajo.getActividad().length;
+  app.window.seleccion.file.falloCierre = true;
+  await assert.rejects(app.trabajo.moverTarjetas([
+    { id: uno, destinoId: destino.id }, { id: dos, destinoId: destino.id }
+  ]), /cerrar/);
+  assert.deepEqual(app.db.exportarDB(), binario);
+  assert.equal(app.trabajo.getActividad().length, eventos);
+  assert.ok(app.trabajo.getTarjetas().every(t => t.lista_id === origen.id));
+  app.window.seleccion.file.falloCierre = false;
+  await app.trabajo.moverTarjetas([
+    { id: uno, destinoId: destino.id }, { id: dos, destinoId: destino.id }
+  ]);
+  assert.deepEqual(Array.from(app.trabajo.getTarjetas(), t => t.lista_id), [destino.id, destino.id]);
+});
+
+test('archivo jerárquico no modifica marcas de los descendientes y restaura de forma explícita', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const lista = app.trabajo.getListas(tablero)[0];
+  const tarjeta = await app.trabajo.guardarTarjeta({ lista_id: lista.id, titulo: 'Tarea' });
+  await app.trabajo.archivar('tarjeta', tarjeta, true);
+  await app.trabajo.archivar('tablero', tablero, true);
+  assert.equal(app.trabajo.getTarjetas()[0].archivada, 1);
+  assert.equal(app.trabajo.getTarjetas()[0].lista_archivada, 0);
+  await assert.rejects(app.trabajo.archivar('tarjeta', tarjeta, false), /archivado/);
+  await app.trabajo.archivar('tablero', tablero, false);
+  assert.equal(app.trabajo.getTarjetas()[0].archivada, 1);
+  await app.trabajo.archivar('tarjeta', tarjeta, false);
+  assert.equal(app.trabajo.getTarjetas()[0].archivada, 0);
+});
+
+test('validaciones rechazan fechas imposibles, colores CSS, padres inexistentes y orden inválido sin eventos', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: 'p1', nombre: 'Tablero' });
+  const lista = app.trabajo.getListas(tablero)[0];
+  const cantidad = app.trabajo.getActividad().length;
+  await assert.rejects(app.trabajo.guardarTarjeta({ lista_id: lista.id, titulo: 'Tarea', inicio: '2026-02-30' }), /fecha/);
+  await assert.rejects(app.trabajo.guardarTarjeta({
+    lista_id: lista.id, titulo: 'Tarea', inicio: '2026-10-25', vencimiento: '2026-10-24'
+  }), /posterior/);
+  await assert.rejects(app.trabajo.guardarEtiqueta({ nombre: 'Color', color: 'url(javascript:evil)' }), /hexadecimal/);
+  await assert.rejects(app.trabajo.guardarTablero({ proyecto_id: 'ausente', nombre: 'No' }), /no existe/);
+  await assert.rejects(app.trabajo.reordenarListas(tablero, [lista.id, lista.id]), /cada lista/);
+  assert.equal(app.trabajo.getActividad().length, cantidad);
+  assert.equal(app.trabajo.getTarjetas().length, 0);
+});
+
+test('asignación explícita y renombre conservan responsables históricos no vinculados', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  await app.db.saveProyecto({ ...proyecto, id: 'p2' }, true);
+  const id = await app.trabajo.guardarResponsable({ nombre: 'Responsable' });
+  assert.ok(app.db.getProyectos().every(p => p.responsable_id === null));
+  await app.trabajo.asignarResponsableProyecto('p1', id);
+  await app.trabajo.guardarResponsable({ id, nombre: 'Nombre corregido' });
+  const datos = app.db.getProyectos();
+  assert.equal(datos.find(p => p.id === 'p1').responsable, 'Nombre corregido');
+  assert.equal(datos.find(p => p.id === 'p2').responsable, 'Responsable');
+  assert.equal(datos.find(p => p.id === 'p2').responsable_id, null);
+  await app.trabajo.asignarResponsableProyecto('p1', null);
+  assert.equal(app.db.getProyectos().find(p => p.id === 'p1').responsable, 'Nombre corregido');
+});
+
+test('una transacción compuesta y sus eventos se descartan enteramente ante error', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const bytes = app.db.exportarDB();
+  await assert.rejects(app.db.transaccion(tx => {
+    tx.run('INSERT INTO responsables (id,nombre) VALUES (?,?)', ['r1', 'Persona']);
+    tx.run('INSERT INTO actividad (tipo,detalle) VALUES (?,?)', ['prueba', 'No debe persistir']);
+    tx.run('INSERT INTO tableros (id,proyecto_id,nombre) VALUES (?,?,?)', ['b1', 'ausente', 'Inválido']);
+  }), /FOREIGN KEY/);
+  assert.equal(app.trabajo.getResponsables().length, 0);
+  assert.equal(app.trabajo.getActividad().length, 0);
+  assert.deepEqual(app.db.exportarDB(), bytes);
+  await assert.rejects(app.db.transaccion(tx => tx.run('DROP INDEX idx_tarjetas_lista')), /índices/);
+  assert.deepEqual(app.db.exportarDB(), bytes);
+});
+
+test('fase 3: edición de tablero, listas personalizadas y tarjetas se conserva al reabrir', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Inicial' });
+  await app.trabajo.guardarTablero({ id: tablero, nombre: 'Editado', descripcion: "Texto <b>literal</b> O'Brien" });
+  const lista = await app.trabajo.guardarLista({ tablero_id: tablero, nombre: 'Personalizada', categoria: 'en_revision' });
+  const otra = await app.trabajo.guardarLista({ tablero_id: tablero, nombre: 'Otra' });
+  await app.trabajo.guardarLista({ id: lista, nombre: 'Renombrada' });
+  const orden = [otra, lista, ...Array.from(app.trabajo.getListas(tablero), l => l.id).filter(id => id !== otra && id !== lista)];
+  await app.trabajo.reordenarListas(tablero, orden);
+  const tarjeta = await app.trabajo.guardarTarjeta({ lista_id: lista, titulo: 'Inicial' });
+  await app.trabajo.guardarTarjeta({
+    id: tarjeta, titulo: 'Editada', descripcion: 'Detalle', prioridad: 'Urgente',
+    inicio: '2026-10-24', vencimiento: '2026-10-30', observaciones: 'Notas', completada: 1
+  });
+  const nueva = entorno(app.store.get('vertex_db'));
+  await nueva.db.init();
+  const board = nueva.trabajo.getTableros()[0];
+  assert.equal(board.proyecto_id, proyecto.id);
+  assert.equal(board.nombre, 'Editado');
+  assert.equal(board.descripcion, "Texto <b>literal</b> O'Brien");
+  assert.deepEqual(Array.from(nueva.trabajo.getListas(tablero), l => l.id), orden);
+  assert.equal(nueva.trabajo.getListas(tablero)[1].nombre, 'Renombrada');
+  const card = nueva.trabajo.getTarjetas()[0];
+  assert.equal(card.id, tarjeta);
+  assert.equal(card.lista_id, lista);
+  assert.equal(card.tablero_id, tablero);
+  assert.equal(card.titulo, 'Editada');
+  assert.equal(card.descripcion, 'Detalle');
+  assert.equal(card.prioridad, 'Urgente');
+  assert.equal(card.inicio, '2026-10-24');
+  assert.equal(card.vencimiento, '2026-10-30');
+  assert.equal(card.observaciones, 'Notas');
+  assert.equal(card.completada, 1);
+  assert.equal(nueva.db.getProyectos()[0].avance, proyecto.avance);
+  assert.equal(nueva.db.getProyectos()[0].responsable, proyecto.responsable);
+});
+
+test('fase 3: campos obligatorios y asociaciones inválidas no escriben ni registran éxito', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Tablero' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const archivo = app.window.seleccion.file;
+  const escrituras = archivo.escrituras;
+  const eventos = app.trabajo.getActividad().length;
+  await assert.rejects(app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: '  ' }), /obligatorio/);
+  await assert.rejects(app.trabajo.guardarLista({ tablero_id: tablero, nombre: '  ' }), /obligatorio/);
+  await assert.rejects(app.trabajo.guardarTarjeta({ lista_id: lista, titulo: '  ' }), /obligatorio/);
+  await assert.rejects(app.trabajo.guardarLista({ tablero_id: 'ausente', nombre: 'No válida' }), /no existe/);
+  await assert.rejects(app.trabajo.guardarTarjeta({ lista_id: 'ausente', titulo: 'No válida' }), /no existe/);
+  assert.equal(archivo.escrituras, escrituras);
+  assert.equal(app.trabajo.getActividad().length, eventos);
+});
+
+test('fase 3: fallo al editar conserva datos y actividad en disco, y permite reintentar', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Confirmado' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  const tarjeta = await app.trabajo.guardarTarjeta({ lista_id: lista, titulo: 'Confirmada' });
+  const file = app.window.seleccion.file;
+  const bytes = file.datos.slice();
+  const eventos = app.trabajo.getActividad().length;
+  file.falloCierre = true;
+  await assert.rejects(app.trabajo.guardarTablero({ id: tablero, nombre: 'No confirmado' }), /cerrar/);
+  await assert.rejects(app.trabajo.guardarLista({ id: lista, nombre: 'No confirmada' }), /cerrar/);
+  await assert.rejects(app.trabajo.guardarTarjeta({ id: tarjeta, titulo: 'No confirmada' }), /cerrar/);
+  assert.equal(app.trabajo.getTableros()[0].nombre, 'Confirmado');
+  assert.equal(app.trabajo.getTarjetas()[0].titulo, 'Confirmada');
+  assert.equal(app.trabajo.getActividad().length, eventos);
+  assert.deepEqual(file.datos, bytes);
+  file.falloCierre = false;
+  await app.trabajo.guardarTarjeta({ id: tarjeta, titulo: 'Reintento' });
+  const nueva = entorno(app.store.get('vertex_db'));
+  await nueva.db.init();
+  assert.equal(nueva.trabajo.getTarjetas()[0].titulo, 'Reintento');
 });

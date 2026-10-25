@@ -227,9 +227,20 @@
         <td style="max-width:180px;font-size:11.5px;">${e(p.objetivo)}</td>
         <td style="max-width:160px;font-size:11.5px;">${e(p.resultado)}</td>
         <td class="row-actions no-print" style="white-space:nowrap;">
-          <button class="btn btn-ghost btn-sm" onclick="PSA.Proyectos.editarProyecto('${e(p.id)}')">Editar</button>
-          <button class="btn btn-danger btn-sm" onclick="PSA.Proyectos.eliminarProyecto('${e(p.id)}')">Eliminar</button>
         </td>`;
+      const acciones = tr.querySelector('.row-actions');
+      [
+        ['Editar', 'btn-ghost', () => editarProyecto(p.id)],
+        ['Tableros', 'btn-ghost', () => PSA.Tableros.abrirProyecto(p.id)],
+        ['Eliminar', 'btn-danger', () => eliminarProyecto(p.id)]
+      ].forEach(([texto, clase, accion]) => {
+        const boton = document.createElement('button');
+        boton.type = 'button';
+        boton.className = 'btn btn-sm ' + clase;
+        boton.textContent = texto;
+        boton.addEventListener('click', accion);
+        acciones.appendChild(boton);
+      });
       body.appendChild(tr);
     });
   }

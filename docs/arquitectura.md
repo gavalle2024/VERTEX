@@ -1,7 +1,8 @@
 # Arquitectura — Gestión de Proyectos PSA
 
-**Versión:** 2.4.0  
-**Fecha:** 2026-10-23
+**Versión de esquema:** 1 (persistencia de fase 2; interfaz funcional de fase 3)
+
+**Fecha:** 2026-10-24
 
 ## Visión general
 
@@ -14,11 +15,12 @@ index.html + css/styles.css
           |
        js/app.js (bootstrap, conexión, notificaciones)
           |
-   +------+----------------+
-   |                       |
-js/proyectos.js       js/dashboard.js
-   |                       |
-   +-------- js/db.js -----+
+   +------+----------------+----------------+
+   |                       |                |
+js/proyectos.js       js/dashboard.js   js/tableros.js
+   |                       |                |
+   |                       |           js/trabajo.js
+   +-------- js/db.js -----+----------------+
                  |
            sql.js / WASM
                  |
@@ -31,13 +33,15 @@ js/proyectos.js       js/dashboard.js
 
 ### Presentación
 
-[index.html](../index.html) contiene la cabecera, controles de conexión, overlay obligatorio, formulario, listado y dashboard. [styles.css](../css/styles.css) concentra estilos, variables, estados y reglas de impresión.
+[index.html](../index.html) contiene cabecera, conexión, overlays, formulario/listado de proyectos, dashboard y sección de tableros con un único diálogo reutilizable. [styles.css](../css/styles.css) concentra estilos, variables, estados, columnas con desplazamiento horizontal, adaptación móvil e impresión.
 
 La cabecera mantiene visible la opción de cambiar de carpeta. Se muestran el nombre de la carpeta, el archivo y el estado de operación o error. No se presenta ese nombre como una ruta absoluta.
 
 ### Persistencia: [db.js](../js/db.js)
 
 Encapsulado en una IIFE bajo `PSA.DB`. Utiliza sql.js 1.10.2 desde cdnjs.
+
+Se carga primero [migraciones.js](../js/migraciones.js) (`PSA.Esquema`) y después de DB se carga [trabajo.js](../js/trabajo.js) (`PSA.Trabajo`). El detalle de esquema, APIs y recuperación está en [migraciones.md](migraciones.md). La fase 3 agrega presentación sobre estas APIs sin cambiar la persistencia.
 
 | API | Resultado |
 |---|---|
@@ -50,6 +54,12 @@ Encapsulado en una IIFE bajo `PSA.DB`. Utiliza sql.js 1.10.2 desde cdnjs.
 | `deleteProyecto(id)` | Promise que se resuelve tras persistir al archivo |
 | `exportarDB()` | Binario SQLite completo del estado confirmado o `null` |
 | `estado` | `{useSQLite, tieneArchivo, esperaPermiso, ocupado, ubicacion, error}` |
+| `migrarConexion()` | Confirma respaldo y migración pendiente; Promise con `{ok, respaldo}` |
+| `cancelarMigracion()` | Descarta la solicitud sin escribir ni cambiar la base previa |
+| `transaccion(operacion)` | Ejecuta callback síncrono sobre candidata, valida y espera escritura confirmada |
+| `consultar(sql, parametros)` | SELECT parametrizado sobre estado confirmado |
+
+`estado` agrega `requiereMigracion` y `destinoMigracion`. Las conexiones pueden devolver `{ok: false, requiereMigracion: true}`: la UI muestra la confirmación, sin tratarlo como éxito.
 
 Los getters `useSQLite`, `tieneArchivo`, `esperaPermiso`, `ocupado` y `hasFSA` permiten consultar el estado sin exponer handles.
 
@@ -60,7 +70,7 @@ Las operaciones fallidas rechazan su Promise; la UI debe capturar y notificar el
 1. El usuario invoca `showDirectoryPicker({mode: 'readwrite'})` desde un clic.
 2. Se busca `vertex.db` en la carpeta.
 3. Si no existe, se pide confirmar la creación de una base vacía, sin copiar la base actual.
-4. Se abre una instancia candidata y se valida con `PRAGMA quick_check`, el DDL y una consulta de las columnas necesarias.
+4. Se abre una instancia candidata, se habilitan FK y se valida con `quick_check`, versión, columnas, índices y relaciones. El esquema legado requiere confirmación y respaldo, no se actualiza automáticamente al abrir.
 5. Solo tras una carga válida, o una escritura inicial exitosa, se reemplaza la conexión activa.
 6. Se recuerda `{archivo: FileSystemFileHandle, carpeta: FileSystemDirectoryHandle}` en IndexedDB, base `psa_fs_v1`, store `handles`, clave `vertex_db`.
 
@@ -90,13 +100,73 @@ Si falla la escritura, la candidata se descarta, se intenta abortar el stream y 
 
 La carga de archivos dañados o incompatibles nunca se convierte silenciosamente en una base vacía. Cancelar o fallar un cambio de ubicación conserva la conexión previa. Al cambiar con éxito, se limpia el formulario; si había datos sin guardar, se pide confirmación previamente.
 
-No hay `localStorage`, fallback JSON ni migración automática de datos antiguos.
+No hay `localStorage`, fallback JSON ni migración automática de formatos antiguos. Sí existe migración explícita del esquema SQLite, con respaldo y consentimiento. Al reabrir una base vigente no se vuelve a migrar.
+
+Las operaciones relacionales usan una transacción SQL en una candidata y registran actividad antes de persistir. Se validan las FK antes de confirmar; un error revierte o descarta toda la operación. Se vuelven a habilitar FK tras `export()` porque sql.js reinicia pragmas al reabrir la conexión.
 
 ### Proyectos: [proyectos.js](../js/proyectos.js)
 
 CRUD con validación de nombre, responsable y fecha de inicio, avance entre 0 y 100, edición cancelable con Esc y confirmación de eliminación. Guardado y eliminación esperan la persistencia y notifican los errores explícitamente.
 
 La tabla filtra por nombre/responsable/división, estado e implementación. CSV exporta solo el subconjunto filtrado, con BOM UTF-8; SQLite exporta toda la base confirmada.
+
+La acción **Tableros** de cada fila abre su catálogo filtrado mediante `PSA.Tableros.abrirProyecto(id)`. Los botones se crean con eventos DOM y no interpolan IDs en código ejecutable. No se modifican campos, cálculos ni contratos del CRUD histórico.
+
+### Tableros: [tableros.js](../js/tableros.js)
+
+IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selección de tablero y estado efímero del editor; no almacena entidades ni handles.
+
+- Catálogo filtrado por proyecto real, inclusión explícita de archivados, apertura y edición.
+- Columnas por lista, nombres libres y categoría funcional; orden de listas activas con `reordenarListas(tableroId, ids)`. La creación de cinco listas iniciales pertenece a `guardarTablero`, no se duplica en la UI.
+- Tarjetas en su lista, detalle/edición, responsable de catálogo existente, prioridad, fechas, observaciones, completitud y archivo/restauración. Los vencimientos se comparan con el día local; no modifican automáticamente estados del proyecto.
+- `guardarTablero`, `guardarLista`, `guardarTarjeta` y `archivar` esperan transacción y escritura confirmadas antes de renderizar/notificar. Los errores se registran y se muestran; un guardado fallido conserva el diálogo y sus datos.
+- `getTableros`, `getListas`, `getTarjetas`, `getResponsables` y `DB.getProyectos` son las únicas fuentes de datos. La UI no ejecuta SQL, no recrea tablas y no usa localStorage.
+- El mismo `<dialog>` nativo cambia sus campos según entidad. Cuenta con etiquetas, título/contexto accesibles, contención de foco, Esc/cancelación con confirmación de descarte y retorno de foco a un elemento existente tras renderizar.
+- Archivados y descendientes de contenedores archivados son de solo lectura. Restaurar un padre no altera marcas propias de hijos. El selector de proyecto se bloquea al editar tablero; una categoría de lista con tarjetas también se bloquea según el contrato existente.
+- El estado global de DB bloquea acciones de tablero y editor mientras se escribe. Los atajos históricos no interfieren con el diálogo. Un cambio de base confirmado reinicia selección y filtros; una conexión fallida no los descarta.
+- Los controles **Ordenar lista antes/después** solo llaman `reordenarListas`; cambiar una columna de lugar no cambia la lista de sus tarjetas.
+- Cada tarjeta ofrece casilla, etapa anterior/siguiente y lista de destino específica. Las acciones direccionales validan límites antes de persistir; el destino se limita a listas activas del tablero actual.
+- Cada tarjeta activa ofrece un controlador nativo de arrastre separado de sus botones y campos. Se puede insertar antes/después de otra tarjeta o al final, dentro de una etapa activa del mismo tablero. `moverTarjeta(id, destinoId, posicion)` persiste el movimiento y normaliza las posiciones afectadas en una transacción; la vista solo se actualiza después de la escritura confirmada.
+- El arrastre siempre mueve una sola tarjeta, incluso si forma parte de una selección. La barra de selección múltiple conserva sus operaciones; el estado accesible informa qué se arrastra. **Subir/Bajar en la etapa** reordena con el mismo contrato y ofrece una alternativa compatible con teclado. El arrastre HTML nativo está orientado a puntero de escritorio; no se ha implementado ni probado interacción táctil.
+- La selección conserva IDs, se ordena por etapa y posición visibles, admite seleccionar toda una etapa y cancelar. Una barra informa la cantidad y ofrece movimiento relativo por tarjeta o un destino común. No se acepta selección vacía, selección archivada ni destino inválido.
+- `moverTarjeta` se conserva para el movimiento individual y actualiza solo ese ID en los traslados al final de una etapa; las posiciones de origen y destino no seleccionadas se preservan. `moverTarjetas` valida el lote, tablero único y listas activas antes de mutar, asigna nuevas posiciones únicas contiguas al final de cada destino en orden visual y no cambia las posiciones de tarjetas restantes. Eventos y completitud se escriben dentro de una sola transacción. Un error de validación/escritura no publica cambios parciales. El éxito vuelve a renderizar y limpia selección.
+- Los controles explícitos de movimiento por etapa y posición se mantienen como alternativa al arrastre.
+
+No incluye gestión del catálogo de responsables/etiquetas, filtros de tareas, calendario ni historial visual. La actividad relacional ya se escribe en la transacción de las APIs existentes. El avance de proyectos sigue siendo manual.
+
+#### Validación de la interfaz de fases 3 y 4
+
+[tests/tableros.browser.js](../tests/tableros.browser.js) no se incluye en la aplicación. Ejecutarlo **solo en una página de prueba sin base real conectada**; rechaza una conexión activa. Usa SQLite real, archivos en memoria e IndexedDB simulado. No solicita permisos ni escribe archivos de usuario.
+
+En la consola del navegador de esa página aislada:
+
+```javascript
+await new Promise((resolve, reject) => {
+  const script = document.createElement('script');
+  script.src = 'tests/tableros.browser.js';
+  script.onload = resolve;
+  script.onerror = reject;
+  document.head.appendChild(script);
+});
+const resultado = await probarInterfazTableros();
+console.log(resultado.resultados); // 42 comprobaciones; una excepción indica fallo.
+```
+
+La prueba usa eventos DOM reales y el diálogo del navegador: CRUD, asociaciones, orden, validación, escape HTML, retraso de cierre, error/reintento, archivo/restauración, estados vacíos y regresión de filtros/dashboard/CSV/SQLite/Esc. Los errores de validación y disco que aparecen en consola son intencionales.
+
+Para verificar una recarga real mediante automatización, conservar fuera de la página `resultado` y `Array.from(window.__archivoPruebaTableros.datos)`, recargar, volver a cargar el script, ejecutar `await prepararPruebaTableros(bytes)` y luego `verificarReaperturaTableros(resultado)`: agrega seis comprobaciones de datos, relaciones, orden y reconstrucción del Kanban desde el binario. Al terminar, recargar para retirar todos los dobles de prueba. La autorización/reconexión de handles reales del sistema operativo sigue siendo una comprobación manual.
+
+Después de la reapertura, `await verificarDisenoTableros()` comprueba nombres de 200 caracteres, desborde, columnas, diálogo, grilla y checkbox al ancho actual; restaura los nombres originales de la base sintética al terminar. Se ejecutó a 390, 768 y 1280 px (cinco comprobaciones por tamaño). Adicionalmente se verificaron Shift+Tab, Esc con descarte rechazado y Esc con descarte confirmado/retorno de foco mediante teclas del navegador.
+
+`await verificarCambioBaseTableros()` agrega cuatro comprobaciones sobre cancelación, archivo inválido, reinicio de selección al cambiar y recuperación sin mezcla al volver a la base sintética original. El script completo suma 67 comprobaciones aprobadas, además de las tres verificaciones de teclado.
+
+La corrección de movimiento se valida con `await probarMovimientoTarjetas()`: 26 comprobaciones de UI para límites, movimiento individual y a destino específico, seleccionar/deseleccionar, selección por etapa, movimiento relativo en ambas direcciones, orden/posiciones relativas, tarjetas que permanecen, falta de selección y error/reintento atómico. Devuelve el binario aislado y las ubicaciones/posiciones esperadas; tras recargar y cargar el helper, `await prepararPruebaTableros(resultado.archivo)` y `verificarReaperturaMovimiento(resultado)` comprueba que los movimientos y el orden persisten.
+
+El DnD se valida con `await probarArrastreTarjetas()`: comprueba el control de inicio, inserción intermedia, reordenamiento dentro de lista, extremos, rechazo intertablero, cancelación, alcance individual con selección múltiple, error/reintento de escritura, orden/posiciones y alternativa de teclado. Devuelve `{archivo, ubicaciones, ordenListas, tableroId, proyectoId}`; tras recargar, `await prepararPruebaTableros(resultado.archivo)` y `verificarReaperturaArrastre(resultado)` comprueban la persistencia. La suite envía eventos `DragEvent` en Chromium con una base sintética; no simula interacción física ni táctil.
+
+Los controles y columnas también se midieron a 390, 768 y 1280 px: no provocan overflow horizontal de documento/tarjeta y el desplazamiento horizontal queda confinado al Kanban.
+
+La regresión final ejecutó 42 comprobaciones de interfaz, 26 de movimiento, 25 de arrastre y 15 comprobaciones responsive (cinco por ancho). La automatización de puntero disponible no produjo eventos de entrada/soltado, por lo que no se registra como prueba de ratón físico; queda recomendada la verificación manual en el navegador de destino.
 
 ### Dashboard: [dashboard.js](../js/dashboard.js)
 
@@ -116,7 +186,7 @@ Define `PSA.escapeHtml`, `formatFecha`, `genId`, `toast`, navegación y `renderT
 
 ## Modelo de datos
 
-El DDL canónico está en [db.js](../js/db.js), tabla `proyectos`:
+El DDL canónico está en [migraciones.js](../js/migraciones.js). La tabla `proyectos` conserva:
 
 - `id`: TEXT PRIMARY KEY.
 - `nombre`, `responsable`: TEXT NOT NULL.
@@ -126,7 +196,7 @@ El DDL canónico está en [db.js](../js/db.js), tabla `proyectos`:
 - `objetivo`, `resultado`, `observaciones`: TEXT.
 - `created_at`, `updated_at`: fechas de creación y última modificación.
 
-El DDL actual no define vistas, índices adicionales ni restricciones CHECK. Los valores de usuario se envían mediante parámetros SQL; los identificadores de columnas provienen de constantes internas.
+El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de responsable a proyectos. Incorpora responsables, tableros, listas, tarjetas, etiquetas, tarjeta_etiquetas y actividad, con índices, CHECK y claves foráneas restrictivas. Los valores se envían mediante parámetros SQL; los identificadores provienen de constantes internas. No se crean vistas SQL. El formulario histórico todavía no expone los nuevos campos.
 
 ## Decisiones y límites
 
@@ -149,3 +219,7 @@ node --test tests\db.test.cjs
 ```
 
 Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
+
+## Evolución propuesta
+
+El [análisis de evolución visual](evolucion-visual.md) contiene la matriz de brechas sobre la línea base (`user_version=0`) y el modelo relacional aprobado. La fase 2 entrega infraestructura y flujo de migración; las fases de pantallas visuales permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
