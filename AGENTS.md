@@ -43,13 +43,13 @@ VERTEX/
 │   ├── tableros.js         # Kanban, catálogos, búsqueda/filtros y diálogo único
 │   ├── calendario.js       # Vistas mensual/semanal/agenda y fechas locales
 │   ├── actividad.js        # Consulta paginada del historial persistido
-│   ├── dashboard.js        # Métricas y panel general
+│   ├── dashboard.js        # Panel principal, métricas y accesos rápidos
 │   └── app.js              # Bootstrap, utilidades globales (PSA.*)
 ├── db/
 │   └── vertex.db           # Base inicial; la app permite otra carpeta
 ├── tests/
 │   ├── db.test.cjs         # Regresión SQLite, migraciones y operaciones
-│   └── tableros.browser.js # Pruebas DOM aisladas de fases 3–6
+│   └── tableros.browser.js # Pruebas DOM aisladas de fases 3–7
 ├── docs/
 │   ├── arquitectura.md     # Diseño y decisiones técnicas
 │   └── cambios.md          # Registro de cambios (changelog)
@@ -71,15 +71,15 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 | `PSA.gestionarConexionDB(elegirCarpeta)` | `js/app.js` | Selecciona carpeta o reconecta la base (requiere gesto del usuario) |
 | `PSA.Proyectos` | `js/proyectos.js` | CRUD + renderizado de proyectos |
 | `PSA.Tableros` | `js/tableros.js` | `render`, `abrirProyecto(id)`, `reiniciar`, `actualizarEstado`, getter `editorAbierto` |
-| `PSA.Calendario` | `js/calendario.js` | `render()` de vistas mensual, semanal y agenda |
-| `PSA.Actividad` | `js/actividad.js` | `render()`, `mostrarTarjeta(id)`, `mostrarTablero(id)` |
-| `PSA.Dashboard` | `js/dashboard.js` | Renderizado del panel |
+| `PSA.Calendario` | `js/calendario.js` | Vistas mensual/semanal/agenda y clasificación compartida de vencimientos |
+| `PSA.Actividad` | `js/actividad.js` | `render()`, `mostrarTarjeta(id)`, `mostrarTablero(id)`, resumen de eventos |
+| `PSA.Dashboard` | `js/dashboard.js` | Panel de control e indicadores reales de proyectos, tableros y tarjetas |
 | `PSA.escapeHtml(s)` | `js/app.js` | Escapa HTML (anti-XSS) |
 | `PSA.formatFecha(f)` | `js/app.js` | `YYYY-MM-DD` → `DD/MM/YYYY` |
 | `PSA.genId()` | `js/app.js` | Genera IDs únicos |
 | `PSA.toast(msg, tipo)` | `js/app.js` | Notificaciones temporales |
 | `PSA.cambiarTab(viewId, btn)` | `js/app.js` | Navegación entre pestañas |
-| `PSA.renderTodo()` | `js/app.js` | Actualiza tabla + dashboard + tableros |
+| `PSA.renderTodo()` | `js/app.js` | Actualiza proyectos, dashboard, tableros, calendario y actividad |
 
 ---
 
@@ -163,6 +163,8 @@ La fase 5 administra responsables y etiquetas locales, con desactivación lógic
 
 La fase 6 reutiliza `tarjetas.inicio`, `tarjetas.vencimiento` y `actividad`. La migración 2 → 3 añade `actividad.tarjeta_titulo` y rellena títulos históricos; registrar un cambio de tarjeta y su evento dentro de `PSA.DB.transaccion`. Las fechas son valores locales `AAAA-MM-DD`, no instantes UTC. No se borran tarjetas físicamente: archivar conserva sus eventos y referencias válidas.
 
+El panel fase 7 es de lectura y no modifica el esquema. Filtra entidades archivadas y contenedores inactivos; identifica completitud por `tarjetas.completada`, estados pendientes/en curso por la categoría funcional de la lista (nunca por su nombre visible), y calcula progreso como completadas / tarjetas activas por tablero. Las ventanas de fecha deben reutilizar `PSA.Calendario.seguimiento()`. Los errores de consulta se exponen, sin sustituir cifras por ceros.
+
 ---
 
 ## Tareas habituales para agentes
@@ -187,7 +189,7 @@ La fase 6 reutiliza `tarjetas.inicio`, `tarjetas.vencimiento` y `actividad`. La 
 
 ## Compatibilidad y configuración
 
-- Las fases 2 a 6 están implementadas; Mis tareas, historial visual ampliado y soporte táctil siguen pendientes. El calendario y el historial básico están disponibles en la navegación.
+- Las fases 2 a 7 están implementadas; Mis tareas, historial visual ampliado de proyectos y soporte táctil siguen pendientes. El panel, calendario e historial básico están disponibles en la navegación.
 
 - No hay fallback a localStorage ni migración automática de proyectos antiguos.
 - Las migraciones de esquema SQLite 0 → 1 → 2 → 3 y 1 → 2 → 3, 2 → 3 requieren consentimiento y respaldo. No confundirlas con migración de formatos localStorage.
@@ -201,7 +203,7 @@ La fase 6 reutiliza `tarjetas.inicio`, `tarjetas.vencimiento` y `actividad`. La 
 - Sin bundler ni instalación de paquetes: `node --test tests\db.test.cjs` con Node.js 22+ e internet.
 - Las pruebas descargan sql.js 1.10.2, ejecutan SQLite real y simulan handles, permisos e IndexedDB. Nunca usar `db/vertex.db` para pruebas destructivas.
 - Verificar sintaxis con `node --check` y comprobar UI en Chrome/Edge para selección, permisos, reconexión y cambio de carpeta.
-- `tests/tableros.browser.js` se ejecuta solo en una página aislada sin conexión real; incluye flujos de fases 3 a 6, simula archivos e IndexedDB y no se incluye en `index.html`.
+- `tests/tableros.browser.js` se ejecuta solo en una página aislada sin conexión real; incluye flujos de fases 3 a 7, simula archivos e IndexedDB y no se incluye en `index.html`.
 - Los filtros no deben modificar relaciones, posiciones ni orden persistido. Con filtros activos, arrastre y reordenamiento en etapa deshabilitados; si una selección incluye tarjetas ocultas, pedir la confirmación explícita existente antes de mover.
 - Responsables y etiquetas desactivados mantienen sus asignaciones históricas; no borrar asociaciones ni ofrecerlos para nuevas asignaciones.
 

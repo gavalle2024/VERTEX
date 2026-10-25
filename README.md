@@ -2,7 +2,7 @@
 
 Aplicación web para registrar, seguir y analizar proyectos de implementación de la **Policía de Seguridad Aeroportuaria**, sin backend ni instalación de paquetes.
 
-**Evolución visual en curso:** están implementadas las fases 1 a 6: persistencia relacional, Kanban, responsables y etiquetas, prioridades, búsqueda y filtros, calendario e historial de actividad. Mis tareas y el historial visual ampliado siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
+**Evolución visual en curso:** están implementadas las fases 1 a 7: persistencia relacional, Kanban, responsables y etiquetas, prioridades, búsqueda y filtros, calendario, historial y panel de control. Mis tareas y el historial visual ampliado de proyectos siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
 
 ## Qué permite hacer
 
@@ -11,7 +11,7 @@ Aplicación web para registrar, seguir y analizar proyectos de implementación d
 - Validar nombre, responsable y fecha de inicio obligatorios, y limitar el avance entre 0 y 100 %.
 - Clasificar proyectos como En curso, Completado, Demorado o Suspendido, con seis niveles de implementación y cinco categorías de cumplimiento.
 - Buscar por nombre, responsable o división y combinar filtros de estado e implementación.
-- Consultar un dashboard global con totales, avance promedio, cumplimiento en término sobre los evaluables, distribución de cumplimiento e implementación y alerta de suspendidos.
+- Consultar el panel de control como pantalla principal: proyectos, tableros y tarjetas activas; tareas por etapa funcional/completitud; prioridades; vencimientos; progreso por tablero; actividad reciente; y accesos rápidos.
 - Exportar los proyectos filtrados a CSV compatible con Excel o descargar una copia SQLite completa mediante **Exportar DB**.
 - Imprimir con los estilos del navegador y cancelar ediciones con **Esc**.
 - Seleccionar y recordar la carpeta de la base de datos desde la interfaz, y cambiarla posteriormente.
@@ -28,6 +28,21 @@ Aplicación web para registrar, seguir y analizar proyectos de implementación d
 - Consultar el Kanban con responsables, distintivos de etiquetas, indicadores de prioridad, vencimiento y completitud, estados vacíos y errores explícitos.
 
 Los estados y el cumplimiento se cargan manualmente; no se recalculan por vencimiento de fechas. Los filtros del listado no afectan al dashboard ni a la exportación completa de la base.
+
+## Panel de control
+
+El panel se actualiza junto con el resto de las vistas después de cada escritura confirmada. Si la base no está conectada, muestra que la información no está disponible en lugar de presentar ceros. Los errores de lectura se informan sin sustituirlos por cifras predeterminadas.
+
+- **Tableros activos:** tableros no archivados asociados a proyectos activos.
+- **Tarjetas activas:** tarjetas no archivadas cuyo proyecto, tablero y lista también están activos.
+- **Pendientes / En curso:** tarjetas no completadas en listas cuya categoría funcional es `pendiente` / `en_curso`. Las demás categorías se agrupan como otras etapas; no se clasifican por nombre de lista.
+- **Completadas:** marca explícita `tarjetas.completada`; la categoría funcional Completado también activa esa marca al mover/crear una tarjeta según el comportamiento existente.
+- **Prioridades:** cantidades por prioridad interna de tarjetas activas (incluye las completadas). La lista de críticas y altas muestra solo tarjetas abiertas y permite abrir su detalle.
+- **Vencimientos:** tareas abiertas que vencen hoy, desde hoy hasta los próximos seis días inclusive, atrasadas antes de hoy, y tareas abiertas sin vencimiento. Las completadas no se cuentan como atrasadas; las fechas se comparan como `AAAA-MM-DD` local, sin conversión UTC. Se muestran hasta diez tareas pendientes con vencimiento; el resto se consulta en Calendario.
+- **Progreso por tablero:** tarjetas activas en el denominador; porcentaje = `completadas / tarjetas activas × 100`, redondeado al entero más cercano. Las pendientes se cuentan por la categoría funcional `pendiente`; otras tareas abiertas aparecen en el total abierto. Un tablero vacío no presenta porcentaje.
+- **Actividad reciente:** hasta seis eventos de la tabla existente `actividad`, con título snapshot, fecha y tablero cuando están disponibles. No crea ni duplica eventos.
+- **Acciones rápidas:** crear proyecto, tablero y tarjeta usando las pestañas, catálogos y editor existentes; también abrir Calendario/Actividad y navegar a prioridades y vencimientos. Crear una tarjeta exige elegir tablero y etapa activa antes de abrir el formulario obligatorio.
+- **Navegación:** pestañas accesibles con flechas, Inicio y Fin, identifican la sección activa y permiten regresar al panel. No hay «Mis tareas» porque esta instalación no autentica usuarios.
 
 ## Uso de tableros, listas y tarjetas
 
@@ -130,11 +145,12 @@ node --check js\trabajo.js
 node --check js\tableros.js
 node --check js\calendario.js
 node --check js\actividad.js
+node --check js\dashboard.js
 ```
 
 Las pruebas descargan la misma versión de sql.js usada por la app, ejecutan SQLite real y simulan los handles y permisos de archivos sin tocar la base del proyecto.
 
-La suite Node actual cubre **37 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()` y `probarFase6Seguimiento()` se ejecutan en una página aislada sin base real y usan bases sintéticas. El arrastre dispara eventos DragEvent; no simula interacción física de ratón ni táctil. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+La suite Node actual cubre **37 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas. La suite cubre accesos, conteos, vencimientos, progreso y errores sin mutar posiciones; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
 
 ## Documentación
 

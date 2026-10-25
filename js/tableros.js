@@ -635,6 +635,46 @@
     $('tableros-proyecto').focus();
   }
 
+  function abrirTablero(id) {
+    const tablero = PSA.Trabajo.getTableros().find(fila => fila.id === id);
+    if (!tablero) throw new Error('El tablero ya no existe.');
+    abrirProyecto(tablero.proyecto_id);
+    const boton = Array.from(document.querySelectorAll('[data-accion="abrir"]'))
+      .find(elemento => elemento.dataset.id === id);
+    if (!boton) throw new Error('No se pudo abrir el tablero seleccionado.');
+    boton.click();
+  }
+
+  function crearTablero() {
+    PSA.cambiarTab('v-tableros', 'v-tableros');
+    render();
+    const boton = document.querySelector('[data-accion="nuevo-tablero"]');
+    if (!boton || boton.disabled) return false;
+    boton.click();
+    return true;
+  }
+
+  function crearTarjetaEnLista(id) {
+    if (PSA.DB.ocupado) throw new Error('La base de datos está ocupada.');
+    let contexto;
+    for (const tablero of PSA.Trabajo.getTableros()) {
+      const lista = PSA.Trabajo.getListas(tablero.id).find(fila => fila.id === id);
+      if (lista) {
+        contexto = { tablero, lista, proyecto: PSA.DB.getProyectos().find(fila => fila.id === tablero.proyecto_id) };
+        break;
+      }
+    }
+    if (!contexto || !contexto.proyecto || contexto.proyecto.archivado ||
+        contexto.tablero.archivado || contexto.lista.archivado) {
+      throw new Error('La etapa seleccionada ya no está disponible.');
+    }
+    tableroId = contexto.tablero.id;
+    tarjetasSeleccionadas.clear();
+    render();
+    PSA.cambiarTab('v-tableros', 'v-tableros');
+    editar('tarjeta', null, contexto.lista.id);
+  }
+
   function abrirTarjeta(id) {
     const tarjeta = PSA.Trabajo.getTarjetas().find(fila => fila.id === id);
     if (!tarjeta) throw new Error('La tarjeta ya no existe.');
@@ -973,7 +1013,8 @@
   });
 
   PSA.Tableros = {
-    render, abrirProyecto, abrirTarjeta, reiniciar, actualizarEstado,
+    render, abrirProyecto, abrirTablero, crearTablero, crearTarjetaEnLista,
+    abrirTarjeta, reiniciar, actualizarEstado,
     get editorAbierto() { return dialog().open; }
   };
 })();

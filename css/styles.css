@@ -264,7 +264,7 @@ tr:hover td { background: #f7f9fc; }
 /* ── DASHBOARD ── */
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -276,7 +276,90 @@ tr:hover td { background: #f7f9fc; }
   text-align: center;
 }
 .stat .num { font-size: 24px; font-weight: 800; color: var(--navy); }
-.stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; margin-top: 2px; }
+.stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; margin-top: 2px; overflow-wrap: anywhere; }
+
+.dashboard-welcome { display: grid; gap: 14px; }
+.dashboard-welcome > div:first-child p { margin: 0; color: var(--muted); font-size: 13px; }
+.dashboard-shortcuts { display: flex; gap: 8px; flex-wrap: wrap; }
+.dashboard-shortcuts .btn { padding: 8px 12px; }
+.dashboard-create-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.dashboard-create-card label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.dashboard-create-card .work-meta { grid-column: 1 / -1; margin: 0; }
+.dashboard-status { color: var(--muted); }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.dashboard-grid > .card { min-width: 0; }
+.dashboard-grid h3 { margin: 12px 0 8px; color: var(--navy); font-size: 13px; }
+.dashboard-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-priority-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.dashboard-priority-count, .dashboard-due-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  min-width: 0;
+}
+.dashboard-priority-count strong, .dashboard-due-count strong { color: var(--navy); font-size: 18px; }
+.dashboard-priority-label {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.dashboard-priority-critical { color: #fff; background: var(--red); }
+.dashboard-priority-high { color: var(--navy); background: var(--amber); }
+.dashboard-priority-medium { color: var(--navy); background: #e8edf5; }
+.dashboard-priority-low { color: var(--text); background: #edf0f5; }
+.dashboard-task-list, .dashboard-board-list, .dashboard-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dashboard-scroll-list { max-height: 22rem; overflow: auto; overscroll-behavior: contain; }
+.dashboard-task-item, .dashboard-board-progress, .dashboard-activity-item {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.dashboard-task-item:last-child, .dashboard-board-progress:last-child, .dashboard-activity-item:last-child { border-bottom: 0; }
+.dashboard-task-title {
+  padding: 0;
+  border: 0;
+  color: var(--navy);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.dashboard-task-title:hover { text-decoration: underline; }
+.dashboard-task-title:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.dashboard-task-item p, .dashboard-activity-item p { margin: 4px 0; color: var(--muted); font-size: 11.5px; }
+.dashboard-empty { padding: 12px 4px; color: var(--muted); font-size: 12px; }
+.dashboard-due-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.dashboard-due-count span { color: var(--muted); font-size: 11px; text-align: right; }
+.dashboard-board-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.dashboard-board-heading > span, .dashboard-progress-value { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.dashboard-board-progress .bar-bg { height: 12px; }
+.dashboard-progress-value { display: block; margin-top: 3px; text-align: right; }
+.dashboard-activity-item > div { display: flex; justify-content: space-between; gap: 8px; }
+.dashboard-activity-item time { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.project-progress-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 8px 0 18px; }
+.project-progress-label { margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+.project-progress-value { margin-top: 4px; color: var(--navy); font-size: 13px; font-weight: 700; }
 
 /* ── BARRA DE PROGRESO ── */
 .bar-bg   { background: var(--border); border-radius: 6px; height: 10px; width: 100%; overflow: hidden; }
@@ -329,16 +412,27 @@ tr:hover td { background: #f7f9fc; }
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .grid          { grid-template-columns: repeat(2, 1fr); }
-  .summary-grid  { grid-template-columns: repeat(2, 1fr); }
+  .summary-grid  { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid.grid-5col, .summary-grid.grid-3col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
   header         { padding: 12px 14px; }
   header h1      { font-size: 15px; }
   main           { padding: 0 10px; }
   .grid          { grid-template-columns: 1fr; }
-  .summary-grid  { grid-template-columns: repeat(2, 1fr); }
+  .summary-grid, .summary-grid.grid-5col, .summary-grid.grid-3col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .filters       { flex-direction: column; }
   nav.tabs button { padding: 10px 12px; font-size: 12px; }
+  .dashboard-create-card { grid-template-columns: 1fr; }
+  .dashboard-create-card .work-meta { grid-column: auto; }
+  .dashboard-priority-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-due-counts { grid-template-columns: 1fr; }
+  .dashboard-board-heading, .dashboard-activity-item > div { align-items: flex-start; flex-direction: column; }
+  .project-progress-grid { grid-template-columns: 1fr; }
 }
 
 /* ── UTILIDADES ── */

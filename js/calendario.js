@@ -33,6 +33,24 @@
       !tarjeta.tablero_archivado && !tarjeta.proyecto_archivado);
   }
 
+  function seguimiento(tarjetas) {
+    const activas = tarjetas.filter(tarjeta =>
+      !tarjeta.archivada && !tarjeta.lista_archivada &&
+      !tarjeta.tablero_archivado && !tarjeta.proyecto_archivado);
+    const hoy = _hoy();
+    const limite = _clave(_sumar(_desdeClave(hoy), 6));
+    const pendientes = activas.filter(tarjeta => !tarjeta.completada);
+    return {
+      hoy: pendientes.filter(tarjeta => tarjeta.vencimiento === hoy),
+      proximos7: pendientes.filter(tarjeta =>
+        tarjeta.vencimiento && tarjeta.vencimiento >= hoy && tarjeta.vencimiento <= limite),
+      atrasadas: pendientes.filter(tarjeta => tarjeta.vencimiento && tarjeta.vencimiento < hoy),
+      sinVencimiento: pendientes.filter(tarjeta => !tarjeta.vencimiento),
+      hoyClave: hoy,
+      limiteClave: limite
+    };
+  }
+
   function _eventosPorFecha(tarjetas, clave) {
     return tarjetas.flatMap(tarjeta => {
       const inicio = tarjeta.inicio === clave;
@@ -186,5 +204,5 @@
     render();
   });
 
-  PSA.Calendario = { render, reiniciar };
+  PSA.Calendario = { render, reiniciar, seguimiento };
 })();

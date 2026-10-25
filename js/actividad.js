@@ -187,5 +187,5 @@
     render();
   });
 
-  PSA.Actividad = { render, mostrarTarjeta, mostrarTablero, reiniciar };
+  PSA.Actividad = { render, mostrarTarjeta, mostrarTablero, reiniciar, resumir: _textoEvento };
 })();

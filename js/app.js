@@ -58,9 +58,26 @@ PSA.cambiarTab = function (viewId, btnOrKey) {
     btnOrKey.classList.add('active');
   }
   document.querySelectorAll('nav.tabs button').forEach(b => {
-    b.setAttribute('aria-selected', String(b.classList.contains('active')));
+    const activa = b.classList.contains('active');
+    b.setAttribute('aria-selected', String(activa));
+    b.tabIndex = activa ? 0 : -1;
   });
 };
+
+document.querySelector('nav.tabs').addEventListener('keydown', event => {
+  const botones = Array.from(document.querySelectorAll('nav.tabs button'));
+  const indice = botones.indexOf(event.target);
+  if (indice < 0) return;
+  let siguiente = indice;
+  if (event.key === 'ArrowRight') siguiente = (indice + 1) % botones.length;
+  else if (event.key === 'ArrowLeft') siguiente = (indice - 1 + botones.length) % botones.length;
+  else if (event.key === 'Home') siguiente = 0;
+  else if (event.key === 'End') siguiente = botones.length - 1;
+  else return;
+  event.preventDefault();
+  botones[siguiente].focus();
+  PSA.cambiarTab(botones[siguiente].dataset.view, botones[siguiente]);
+});
 
 /** Renderiza todos los módulos de la aplicación desde el estado confirmado. */
 PSA.renderTodo = function () {

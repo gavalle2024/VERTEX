@@ -29,18 +29,18 @@
 <!-- ══════════════════════════════════════════
      NAVEGACIÓN POR PESTAÑAS
      ══════════════════════════════════════════ -->
-<nav class="tabs" role="tablist">
-  <button class="active" role="tab" aria-selected="true"
+<nav class="tabs" role="tablist" aria-label="Navegación principal">
+  <button id="tab-dashboard" class="active" role="tab" aria-selected="true" aria-controls="v-dashboard" tabindex="0"
           data-view="v-dashboard"
-          onclick="PSA.cambiarTab('v-dashboard', this)">Panel general</button>
-  <button role="tab" aria-selected="false"
+          onclick="PSA.cambiarTab('v-dashboard', this)">Panel de control</button>
+  <button id="tab-proyectos" role="tab" aria-selected="false" aria-controls="v-proyectos" tabindex="-1"
           data-view="v-proyectos"
           onclick="PSA.cambiarTab('v-proyectos', this)">Proyectos</button>
-  <button role="tab" aria-selected="false" data-view="v-tableros"
+  <button id="tab-tableros" role="tab" aria-selected="false" aria-controls="v-tableros" tabindex="-1" data-view="v-tableros"
           onclick="PSA.cambiarTab('v-tableros', this)">Tableros</button>
-  <button role="tab" aria-selected="false" data-view="v-calendario"
+  <button id="tab-calendario" role="tab" aria-selected="false" aria-controls="v-calendario" tabindex="-1" data-view="v-calendario"
           onclick="PSA.cambiarTab('v-calendario', this)">Calendario</button>
-  <button role="tab" aria-selected="false" data-view="v-actividad"
+  <button id="tab-actividad" role="tab" aria-selected="false" aria-controls="v-actividad" tabindex="-1" data-view="v-actividad"
           onclick="PSA.cambiarTab('v-actividad', this)">Actividad</button>
 </nav>
 
@@ -92,47 +92,99 @@
   <!-- ══════════════════════════════════════
        PANEL GENERAL (DASHBOARD)
        ══════════════════════════════════════ -->
-  <section id="v-dashboard" class="view active" role="tabpanel">
-
-    <div class="card">
-      <h2>Estado general de proyectos</h2>
-      <div class="summary-grid" id="dash-estado"></div>
-      <div id="dash-barras"></div>
+  <section id="v-dashboard" class="view active" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0">
+    <div class="card dashboard-welcome">
+      <div>
+        <h2>Panel de control</h2>
+        <p>Resumen actualizado de proyectos, tableros, tareas, vencimientos y actividad local.</p>
+      </div>
+      <div class="dashboard-shortcuts" id="dash-accesos" aria-label="Accesos rápidos">
+        <button type="button" class="btn btn-ghost" id="dash-crear-proyecto">Crear proyecto</button>
+        <button type="button" class="btn btn-primary" id="dash-crear-tablero">Crear tablero</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-view="v-proyectos">Proyectos</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-view="v-tableros">Tableros</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-view="v-calendario">Calendario</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-view="v-actividad">Actividad reciente</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-scroll="dash-prioridades">Tareas prioritarias</button>
+        <button type="button" class="btn btn-ghost" data-dashboard-scroll="dash-vencimientos">Tareas atrasadas</button>
+      </div>
+      <div class="dashboard-create-card">
+        <label>Tablero
+          <select id="dash-nueva-tarjeta-tablero"><option value="">Seleccione un tablero</option></select>
+        </label>
+        <label>Etapa
+          <select id="dash-nueva-tarjeta-lista" disabled><option value="">Seleccione una etapa</option></select>
+        </label>
+        <button type="button" class="btn btn-gold" id="dash-crear-tarjeta" disabled>Crear tarjeta</button>
+        <p id="dash-nueva-tarjeta-ayuda" class="work-meta">Seleccione un tablero y una etapa activos.</p>
+      </div>
+      <p id="dash-quick-status" class="work-meta" role="status" aria-live="polite"></p>
     </div>
+    <p id="dash-no-disponible" class="dashboard-status" role="status"></p>
+    <p id="dash-error" class="form-error hidden" role="alert"></p>
 
-    <div class="card">
-      <h2>Cumplimiento</h2>
-      <div class="summary-grid grid-5col" id="dash-cumplimiento"></div>
-    </div>
+    <div id="dash-data">
+      <div class="card">
+        <h2>Resumen de trabajo</h2>
+        <div class="summary-grid dashboard-metrics" id="dash-work-stats" aria-live="polite"></div>
+        <p id="dash-indicadores-ayuda" class="work-meta"></p>
+      </div>
 
-    <div class="card">
-      <h2>Nivel de implementación</h2>
-      <div class="summary-grid grid-3col" id="dash-implementacion"></div>
-    </div>
+      <div class="dashboard-grid">
+        <section class="card" id="dash-prioridades" aria-labelledby="dash-prioridades-titulo">
+          <h2 id="dash-prioridades-titulo">Prioridades</h2>
+          <div id="dash-prioridades-conteo" class="dashboard-priority-counts"></div>
+          <h3>Tareas críticas y altas abiertas</h3>
+          <div id="dash-prioridades-lista" class="dashboard-scroll-list"></div>
+        </section>
 
-    <!-- Alerta de proyectos suspendidos -->
-    <div class="card card-danger hidden" id="dash-suspendidos">
-      <h2 class="danger">Proyectos suspendidos</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Proyecto</th>
-              <th>Responsable</th>
-              <th>Observaciones</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <section class="card" id="dash-vencimientos" aria-labelledby="dash-vencimientos-titulo">
+          <h2 id="dash-vencimientos-titulo">Seguimiento de vencimientos</h2>
+          <div id="dash-vencimiento-conteo" class="dashboard-due-counts"></div>
+          <ol id="dash-vencimientos-lista" class="dashboard-task-list dashboard-scroll-list"></ol>
+          <p id="dash-vencimientos-mas" class="work-meta"></p>
+          <button type="button" class="btn btn-ghost btn-sm" data-dashboard-view="v-calendario">Abrir calendario</button>
+        </section>
+
+        <section class="card" aria-labelledby="dash-tableros-titulo">
+          <h2 id="dash-tableros-titulo">Progreso de tableros</h2>
+          <ul id="dash-tableros-progreso" class="dashboard-board-list dashboard-scroll-list"></ul>
+        </section>
+
+        <section class="card" aria-labelledby="dash-actividad-titulo">
+          <h2 id="dash-actividad-titulo">Actividad reciente</h2>
+          <p id="dash-actividad-error" class="form-error" role="alert"></p>
+          <ol id="dash-actividad-reciente" class="dashboard-activity-list dashboard-scroll-list"></ol>
+          <button type="button" class="btn btn-ghost btn-sm" data-dashboard-view="v-actividad">Ver historial completo</button>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="dash-proyectos-titulo">
+        <h2 id="dash-proyectos-titulo">Indicadores de proyectos</h2>
+        <div class="summary-grid" id="dash-estado"></div>
+        <div id="dash-barras"></div>
+        <h3>Cumplimiento</h3>
+        <div class="summary-grid grid-5col" id="dash-cumplimiento"></div>
+        <h3>Nivel de implementación</h3>
+        <div class="summary-grid grid-3col" id="dash-implementacion"></div>
+      </section>
+
+      <div class="card card-danger hidden" id="dash-suspendidos">
+        <h2 class="danger">Proyectos suspendidos</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Proyecto</th><th>Responsable</th><th>Observaciones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
-
   </section>
 
   <!-- ══════════════════════════════════════
        PROYECTOS
        ══════════════════════════════════════ -->
-  <section id="v-proyectos" class="view" role="tabpanel">
+  <section id="v-proyectos" class="view" role="tabpanel" aria-labelledby="tab-proyectos" tabindex="0">
 
     <!-- Formulario -->
     <div class="card">
@@ -314,7 +366,7 @@
 
   </section>
 
-  <section id="v-tableros" class="view" role="tabpanel" aria-label="Tableros">
+  <section id="v-tableros" class="view" role="tabpanel" aria-labelledby="tab-tableros" tabindex="0">
     <div class="card">
       <h2>Tableros de proyectos</h2>
       <div class="filters no-print">
@@ -421,7 +473,7 @@
     </div>
   </section>
 
-  <section id="v-calendario" class="view" role="tabpanel" aria-label="Calendario de tarjetas">
+  <section id="v-calendario" class="view" role="tabpanel" aria-labelledby="tab-calendario" tabindex="0">
     <div class="card">
       <h2>Calendario de tareas</h2>
       <p class="work-meta">Se muestran las fechas de inicio y vencimiento. Las fechas son locales y no se convierten a UTC.
@@ -441,7 +493,7 @@
     </div>
   </section>
 
-  <section id="v-actividad" class="view" role="tabpanel" aria-label="Historial de actividad">
+  <section id="v-actividad" class="view" role="tabpanel" aria-labelledby="tab-actividad" tabindex="0">
     <div class="card">
       <h2>Historial de actividad</h2>
       <div class="filters no-print">

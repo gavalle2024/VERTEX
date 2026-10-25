@@ -35,7 +35,7 @@ js/proyectos.js       js/dashboard.js   js/tableros.js
 
 ### Presentación
 
-[index.html](../index.html) contiene cabecera, conexión, overlays, formulario/listado de proyectos, dashboard, tableros, calendario e historial, además de un único diálogo reutilizable para editar tarjetas. [styles.css](../css/styles.css) concentra estilos, variables, estados, columnas con desplazamiento horizontal, vistas temporales, adaptación móvil e impresión.
+[index.html](../index.html) contiene cabecera, conexión, overlays, formulario/listado de proyectos, panel de control, tableros, calendario e historial, además de un único diálogo reutilizable para editar tarjetas. [styles.css](../css/styles.css) concentra estilos, variables, estados, columnas con desplazamiento horizontal, vistas temporales, panel adaptable e impresión.
 
 La cabecera mantiene visible la opción de cambiar de carpeta. Se muestran el nombre de la carpeta, el archivo y el estado de operación o error. No se presenta ese nombre como una ruta absoluta.
 
@@ -175,11 +175,29 @@ El DnD se valida con `await probarArrastreTarjetas()`: comprueba el control de i
 
 Los controles y columnas también se midieron a 390, 768 y 1280 px: no provocan overflow horizontal de documento/tarjeta y el desplazamiento horizontal queda confinado al Kanban.
 
-La regresión final ejecutó 42 comprobaciones de interfaz, 26 de movimiento, 25 de arrastre y 15 comprobaciones responsive (cinco por ancho). La automatización de puntero disponible no produjo eventos de entrada/soltado, por lo que no se registra como prueba de ratón físico; queda recomendada la verificación manual en el navegador de destino.
+La regresión de las fases 3 y 4 ejecutó 42 comprobaciones de interfaz, 26 de movimiento y 25 de arrastre; el diseño Kanban se midió a 390, 768 y 1280 px. La automatización de puntero disponible no produjo eventos de entrada/soltado, por lo que no se registra como prueba de ratón físico; queda recomendada la verificación manual en el navegador de destino.
 
-### Dashboard: [dashboard.js](../js/dashboard.js)
+### Panel de control: [dashboard.js](../js/dashboard.js)
 
-Métricas sobre todos los proyectos, independientemente de los filtros:
+Vista principal de solo lectura, actualizada por `PSA.renderTodo()` tras cada cambio confirmado. Consulta datos por las APIs existentes (`DB.getProyectos`, `Trabajo.getTableros/getTarjetas/getActividad`) y reutiliza el clasificador `Calendario.seguimiento`; no añade esquema, caché ni escrituras.
+
+Métricas de tarjetas:
+
+- Tableros activos asociados a proyectos activos y tarjetas activas (tarjeta, lista, tablero y proyecto no archivados).
+- Pendientes y en curso se identifican por la categoría funcional de la lista, excluyendo completadas; otras categorías se presentan aparte. No se comparan nombres libres de etapa.
+- Completadas usan la marca explícita `tarjetas.completada`.
+- Prioridades cuentan tarjetas activas por valor interno; `Urgente` se presenta como Crítica. La lista de Crítica/Alta muestra tareas abiertas y enlaza al editor existente.
+- Vencimientos usan la misma ventana local del calendario: hoy es el día local actual; próximos siete días incluye hoy y los seis siguientes; atrasadas son anteriores a hoy. Se excluyen tarjetas completadas y sin vencimiento del conteo de atrasadas. La lista muestra hasta diez tareas vencidas o por vencer.
+- Progreso por tablero incluye todas las tarjetas activas del tablero en el denominador: `completadas / tarjetas activas × 100`, redondeado al entero más cercano. También expone pendientes (categoría funcional `pendiente`) y abiertas. Sin tarjetas, muestra estado vacío, no porcentaje.
+- Actividad reciente presenta hasta seis filas de `actividad`, con snapshot del título, hora local, tablero y enlace a tarjeta/tablero cuando están disponibles. Solo consulta; no emite eventos.
+
+Un archivo no conectado muestra estado no disponible, no cifras cero. Los errores de consulta general ocultan los valores potencialmente obsoletos; un error exclusivo de actividad se informa sin inventar eventos ni descartar las demás métricas válidas.
+
+Accesos rápidos reusan las pestañas y el único editor existente. Crear tarjeta exige seleccionar tablero y etapa activa. No se ofrece «Mis tareas»: la aplicación no dispone de autenticación. Las pestañas admiten flechas, Home y End y sincronizan `aria-selected`, `tabindex` y la vista asociada.
+
+En la página aislada anterior, ejecutar `await probarFase7Dashboard()` para validar el estado sin base conectada, ausencia de proyecto/tablero/etapas, conteos y filtros de archivo, calendario de vencimientos, alias de prioridad, progreso con 0/20/100 % y tablero vacío, actividad y sus errores, accesos rápidos, actualización tras guardar, navegación y conservación del orden. La ejecución final aprobó 28 comprobaciones. El responsive del panel y las grillas de métricas se verificaron a 390, 768 y 1280 px, sin desbordamiento de documento.
+
+Los indicadores históricos de proyecto se mantienen y se calculan sobre todos los proyectos, independientemente de los filtros:
 
 - Total y cantidades en curso, completados y demorados.
 - Avance promedio.
@@ -187,7 +205,7 @@ Métricas sobre todos los proyectos, independientemente de los filtros:
 - Cinco categorías de cumplimiento y seis niveles de implementación.
 - Tabla de suspendidos con responsable y observaciones.
 
-Estado, cumplimiento y avance son ingresados manualmente; no se deducen automáticamente de las fechas.
+Estado, cumplimiento y avance son ingresados manualmente; no se deducen automáticamente de las fechas ni se confunden con el progreso de tarjetas.
 
 ### Bootstrap y utilidades: [app.js](../js/app.js)
 
@@ -221,7 +239,7 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 
 ## Verificación
 
-[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 6 aprobó **37 pruebas**, incluidas migración/rollback sintéticos y actividad de tarjeta.
+[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 7 aprobó **37 pruebas**, incluidas migración/rollback sintéticos y actividad de tarjeta.
 
 ```powershell
 node --test tests\db.test.cjs
@@ -229,8 +247,8 @@ node --test tests\db.test.cjs
 
 Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
 
-La prueba de navegador `probarFase6Seguimiento()` aprobó **24 comprobaciones** para calendario mensual/semanal/agenda, navegación, fechas atrasadas/próximas, apertura de tarjetas, historial por tarjeta/tablero/páginas y filtros temporales combinados. Las regresiones DOM de fases 3 a 5 aprobaron 42, 26, 25 y 18 comprobaciones, respectivamente. Se comprobaron 390, 768 y 1280 px sin desbordamiento de página ni del calendario.
+Las pruebas DOM en Chromium aprobaron: fases 3–7 **42, 26, 25, 18, 24 y 28 comprobaciones**, respectivamente. La fase 7 cubre conteos, archivos, fechas, prioridad, barra de progreso (0/20/100 y tablero vacío), errores, accesos rápidos, actualización al guardar, navegación por teclado y preservación del orden. La página y las grillas históricas se midieron a 390, 768 y 1280 px sin desbordamiento horizontal.
 
 ## Evolución propuesta
 
-El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 6 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
+El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 7 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado de proyectos permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).

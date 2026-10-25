@@ -1080,3 +1080,213 @@ window.probarFase6Seguimiento = async function () {
 
   return { resultados };
 };
+
+window.probarFase7Dashboard = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const fecha = dias => {
+    const valor = new Date();
+    valor.setDate(valor.getDate() + dias);
+    return `${valor.getFullYear()}-${String(valor.getMonth() + 1).padStart(2, '0')}-${String(valor.getDate()).padStart(2, '0')}`;
+  };
+  const guardarDialogo = async () => {
+    document.querySelector('#trabajo-form').requestSubmit();
+    for (let intento = 0; intento < 1000; intento++) {
+      if (!PSA.DB.ocupado) { await Promise.resolve(); return; }
+      await Promise.resolve();
+    }
+    throw new Error('La escritura del acceso rápido no finalizó.');
+  };
+  const indicador = nombre => Array.from(document.querySelectorAll('#dash-work-stats .stat'))
+    .find(elemento => elemento.querySelector('.lbl').textContent === nombre);
+  check(!document.querySelector('#dash-no-disponible').classList.contains('hidden') &&
+    document.querySelector('#dash-no-disponible').textContent.includes('Conecte una base') &&
+    document.querySelector('#dash-work-stats').textContent.trim() === '',
+  'Sin base no presenta ceros ni estadísticas simuladas');
+  await window.prepararPruebaTableros();
+  PSA.Dashboard.render();
+  check(document.querySelector('#dash-crear-tablero').disabled &&
+    document.querySelector('#dash-crear-tarjeta').disabled &&
+    document.querySelector('#dash-quick-status').textContent.includes('Cree un proyecto'),
+  'Sin proyectos, explica el requisito y evita abrir un formulario de tablero inválido');
+  const proyecto = {
+    id: 'fase7-proyecto', nombre: 'Proyecto fase 7', responsable: 'Responsable local',
+    division: 'Prueba', inicio: fecha(0), meta: '', fin: '', estado: 'En curso', avance: 50,
+    implementacion: 'No iniciado', cumplimiento: 'En curso (pendiente de evaluar)',
+    objetivo: '', resultado: '', observaciones: ''
+  };
+  await PSA.DB.saveProyecto(proyecto, true);
+  PSA.renderTodo();
+  check(Array.from(document.querySelectorAll('#dash-work-stats .stat'))
+    .find(elemento => elemento.querySelector('.lbl').textContent === 'Tableros activos')
+    .querySelector('.num').textContent === '0' &&
+    !document.querySelector('#dash-crear-tablero').disabled &&
+    document.querySelector('#dash-nueva-tarjeta-ayuda').textContent.includes('Cree un tablero'),
+  'Con proyecto pero sin tableros, habilita crear tablero y explica cómo crear tarjetas');
+  const tablero = await PSA.Trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Tablero con tareas' });
+  const listas = PSA.Trabajo.getListas(tablero);
+  const listaRevision = listas.find(lista => lista.categoria === 'en_revision');
+  const pendienteHoy = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Panel hoy', prioridad: 'Urgente',
+    vencimiento: fecha(0)
+  });
+  const cursoAtrasada = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[1].id, titulo: 'Panel atrasada', prioridad: 'Alta',
+    vencimiento: fecha(-1)
+  });
+  const revisionPronto = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listaRevision.id, titulo: 'Panel próxima', prioridad: 'Media',
+    vencimiento: fecha(2)
+  });
+  const completadaAtrasada = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[4].id, titulo: 'Panel completada', prioridad: 'Baja',
+    vencimiento: fecha(-2)
+  });
+  const sinVencimiento = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Panel sin vencimiento', prioridad: 'Media'
+  });
+  const archivada = await PSA.Trabajo.guardarTarjeta({
+    lista_id: listas[0].id, titulo: 'Panel archivada', prioridad: 'Alta'
+  });
+  await PSA.Trabajo.archivar('tarjeta', archivada, true);
+  const tableroVacio = await PSA.Trabajo.guardarTablero({
+    proyecto_id: proyecto.id, nombre: 'Tablero vacío'
+  });
+  const ubicaciones = JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion]));
+  PSA.renderTodo();
+  PSA.cambiarTab('v-dashboard', 'v-dashboard');
+
+  check(indicador('Tableros activos').querySelector('.num').textContent === '2',
+    'Cuenta únicamente tableros activos de proyectos activos');
+  check(indicador('Tarjetas activas').querySelector('.num').textContent === '5',
+    'Cuenta una vez las tarjetas no archivadas y excluye archivadas');
+  check(indicador('Pendientes').querySelector('.num').textContent === '2' &&
+    indicador('En curso').querySelector('.num').textContent === '1' &&
+    indicador('Completadas').querySelector('.num').textContent === '1',
+  'Agrupa por categoría funcional y marca explícita de completitud');
+  check(indicador('En revisión, bloqueadas u otras etapas').querySelector('.num').textContent === '1',
+    'Conserva categorías funcionales distintas en otras etapas');
+  check(document.querySelector('#dash-vencimiento-conteo').textContent.includes('1Vencen hoy') &&
+    document.querySelector('#dash-vencimiento-conteo').textContent.includes('2Hoy y próximos 6 días') &&
+    document.querySelector('#dash-vencimiento-conteo').textContent.includes('1Atrasadas') &&
+    document.querySelector('#dash-vencimiento-conteo').textContent.includes('1Sin vencimiento'),
+  'Calcula vencimientos inclusivos y excluye completadas y sin fecha de atrasadas');
+  check(document.querySelector('#dash-vencimientos-lista').textContent.includes('Panel hoy') &&
+    document.querySelector('#dash-vencimientos-lista').textContent.includes('Panel atrasada') &&
+    document.querySelector('#dash-vencimientos-lista').textContent.includes('Panel próxima') &&
+    !document.querySelector('#dash-vencimientos-lista').textContent.includes('Panel completada'),
+  'Lista tareas de vencimiento y abreviatura con datos reales');
+  const prioridades = Array.from(document.querySelectorAll('#dash-prioridades-conteo .dashboard-priority-count'))
+    .map(elemento => [elemento.querySelector('.dashboard-priority-label').textContent,
+      elemento.querySelector('strong').textContent]);
+  check(JSON.stringify(prioridades) === JSON.stringify([
+    ['Crítica', '1'], ['Alta', '1'], ['Media', '2'], ['Baja', '1']
+  ]),
+  'Cuenta las cuatro prioridades y representa Urgente como Crítica');
+  check(document.querySelector('#dash-prioridades-lista [data-dashboard-card-id="' + pendienteHoy + '"]') &&
+    document.querySelector('#dash-prioridades-lista [data-dashboard-card-id="' + cursoAtrasada + '"]'),
+  'Prioridades Crítica y Alta enlazan a sus tarjetas existentes');
+
+  const progresos = document.querySelectorAll('#dash-tableros-progreso [role="progressbar"]');
+  check(progresos.length === 1 && progresos[0].getAttribute('aria-valuenow') === '20' &&
+    document.querySelector('#dash-tableros-progreso').textContent.includes('Sin tarjetas activas') &&
+    document.querySelector('#dash-tableros-progreso').textContent.includes('No hay porcentaje'),
+  'Calcula progreso con activas y completitud explícita, y no divide tableros vacíos');
+  check(document.querySelectorAll('#dash-actividad-reciente > li.dashboard-activity-item').length === 6 &&
+    !document.querySelector('#dash-actividad-reciente .dashboard-empty'),
+  'Muestra actividad reciente limitada usando eventos persistidos');
+  const eventosPanel = PSA.Trabajo.getActividad({ limite: 6 });
+  const filasActividad = Array.from(document.querySelectorAll('#dash-actividad-reciente > li.dashboard-activity-item'));
+  check(filasActividad.length === eventosPanel.length &&
+    new Set(eventosPanel.map(evento => evento.id)).size === filasActividad.length,
+  'Cada evento persistido se muestra una vez, aunque una tarjeta tenga varios eventos');
+  check(JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion])) === ubicaciones,
+    'El render del panel no cambia etapas ni posiciones persistidas');
+  for (const tarjeta of PSA.Trabajo.getTarjetas().filter(t => t.tablero_id === tablero && !t.archivada)) {
+    await PSA.Trabajo.guardarTarjeta({
+      id: tarjeta.id, lista_id: tarjeta.lista_id, titulo: tarjeta.titulo, completada: 1
+    });
+  }
+  PSA.renderTodo();
+  check(document.querySelector(`#dash-tableros-progreso [role="progressbar"][aria-valuenow="100"]`),
+    'Un tablero con todas sus tarjetas activas completadas muestra 100%');
+  for (const tarjeta of PSA.Trabajo.getTarjetas().filter(t => t.tablero_id === tablero && !t.archivada)) {
+    await PSA.Trabajo.guardarTarjeta({
+      id: tarjeta.id, lista_id: tarjeta.lista_id, titulo: tarjeta.titulo, completada: 0
+    });
+  }
+  PSA.renderTodo();
+  check(document.querySelector(`#dash-tableros-progreso [role="progressbar"][aria-valuenow="0"]`),
+    'Un tablero sin tarjetas completadas muestra 0%');
+  for (const lista of listas) await PSA.Trabajo.archivar('lista', lista.id, true);
+  PSA.renderTodo();
+  document.querySelector('#dash-nueva-tarjeta-tablero').value = tablero;
+  document.querySelector('#dash-nueva-tarjeta-tablero').dispatchEvent(new Event('change', { bubbles: true }));
+  check(document.querySelector('#dash-nueva-tarjeta-lista').disabled &&
+    document.querySelector('#dash-nueva-tarjeta-ayuda').textContent.includes('No hay etapas activas'),
+  'Sin etapas activas, explica por qué no se puede crear una tarjeta');
+  for (const lista of listas) await PSA.Trabajo.archivar('lista', lista.id, false);
+  PSA.renderTodo();
+
+  const anteriorActividad = PSA.Trabajo.getActividad;
+  PSA.Trabajo.getActividad = () => { throw new Error('Fallo sintético de lectura de actividad'); };
+  PSA.Dashboard.render();
+  check(document.querySelector('#dash-actividad-error').textContent.includes('Fallo sintético') &&
+    !document.querySelector('#dash-data').classList.contains('hidden'),
+  'Informa un error de actividad sin ocultar métricas consultadas correctamente');
+  PSA.Trabajo.getActividad = anteriorActividad;
+  const anteriorTarjetas = PSA.Trabajo.getTarjetas;
+  PSA.Trabajo.getTarjetas = () => { throw new Error('Fallo sintético de lectura de tarjetas'); };
+  PSA.Dashboard.render();
+  check(document.querySelector('#dash-error').textContent.includes('Fallo sintético') &&
+    document.querySelector('#dash-data').classList.contains('hidden'),
+  'No muestra estadísticas con apariencia válida cuando falla la consulta principal');
+  PSA.Trabajo.getTarjetas = anteriorTarjetas;
+  PSA.Dashboard.render();
+
+  document.querySelector('[data-dashboard-card-id="' + pendienteHoy + '"]').click();
+  check(document.querySelector('#trabajo-dialog').open &&
+    document.querySelector('#trabajo-form [name="titulo"]').value === 'Panel hoy',
+  'Abrir tareas del panel reutiliza el editor existente');
+  document.querySelector('#trabajo-dialog-cancelar').click();
+  document.querySelector('[data-dashboard-board-id="' + tableroVacio + '"]').click();
+  check(document.querySelector('#v-tableros').classList.contains('active') &&
+    document.querySelector('#tablero-titulo').textContent === 'Tablero vacío',
+  'El progreso abre el tablero correspondiente con la navegación existente');
+  PSA.cambiarTab('v-dashboard', 'v-dashboard');
+  document.querySelector('#dash-nueva-tarjeta-tablero').value = tablero;
+  document.querySelector('#dash-nueva-tarjeta-tablero').dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('#dash-nueva-tarjeta-lista').value = listas[0].id;
+  document.querySelector('#dash-crear-tarjeta').click();
+  check(document.querySelector('#trabajo-dialog').open &&
+    document.querySelector('#trabajo-form [name="titulo"]').value === '' &&
+    document.querySelector('#trabajo-dialog-contexto').textContent.includes('Tablero con tareas'),
+  'Crear tarjeta desde el acceso rápido reutiliza el editor y solicita título obligatorio');
+  document.querySelector('#trabajo-form [name="titulo"]').value = 'Tarjeta del acceso rápido';
+  await guardarDialogo();
+  check(indicador('Tarjetas activas').querySelector('.num').textContent === '6' &&
+    document.querySelector('#dash-actividad-reciente').textContent.includes('Tarjeta del acceso rápido'),
+  'El panel actualiza tarjetas y actividad sin recargar tras un guardado confirmado');
+  document.querySelector('#dash-crear-tablero').click();
+  check(document.querySelector('#trabajo-dialog').open &&
+    document.querySelector('#trabajo-dialog-titulo').textContent === 'Crear tablero',
+  'Crear tablero reutiliza el formulario existente');
+  document.querySelector('#trabajo-dialog-cancelar').click();
+
+  document.querySelector('#tab-dashboard').focus();
+  document.querySelector('#tab-dashboard').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  check(document.querySelector('#tab-proyectos').getAttribute('aria-selected') === 'true' &&
+    document.querySelector('#v-proyectos').classList.contains('active'),
+  'La navegación por flecha actualiza la pestaña seleccionada y la vista');
+  document.querySelector('#tab-proyectos').dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  check(document.querySelector('#tab-dashboard').getAttribute('aria-selected') === 'true' &&
+    document.querySelector('#v-dashboard').classList.contains('active'),
+  'La navegación Home regresa al panel de control');
+  check(document.querySelector('#dash-crear-tarjeta').disabled === false,
+    'Las acciones rápidas quedan disponibles con tablero y etapa activos');
+
+  return { resultados };
+};

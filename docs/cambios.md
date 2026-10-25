@@ -6,6 +6,20 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-10-24
 
+### Panel de control, indicadores y experiencia de usuario (fase 7) — 2026-10-25
+- Se estableció **Panel de control** como pantalla principal, manteniendo las métricas anteriores de proyectos y agregando conteos de tableros/tarjetas activas, pendientes, en curso, completadas y otras categorías funcionales.
+- Los indicadores excluyen tarjetas archivadas y descendientes de listas, tableros o proyectos archivados. La completitud se basa en `tarjetas.completada`; Pendientes/En curso usan `listas.categoria`, nunca nombres libres. El progreso por tablero es completadas / tarjetas activas × 100, con estado vacío sin porcentaje.
+- Se amplió el resumen de prioridad para Crítica/Alta/Media/Baja; Crítica mantiene el valor SQLite compatible `Urgente`. Se pueden abrir tarjetas críticas/altas desde la lista prioritaria.
+- Se reutilizó `PSA.Calendario.seguimiento()` para vencimientos locales: hoy, hoy + seis días, atrasadas y sin fecha. Las atrasadas excluyen completadas y tareas sin vencimiento. El panel muestra las diez primeras tareas vencidas/próximas con tablero, etapa, prioridad, responsables y enlace al editor.
+- Se agregaron progreso por tablero, actividad reciente limitada a seis eventos existentes y accesos a proyecto, tablero, tarjeta, calendario, historial y tareas prioritarias/vencidas. Crear tablero/tarjeta abre los flujos existentes; la tarjeta requiere tablero y etapa activa.
+- La navegación principal identifica pestaña/vista activa y soporta flechas, Inicio y Fin. La aplicación no incorpora «Mis tareas» ni simula una identidad de usuario.
+- Sin conexión a DB se informa que los indicadores no están disponibles; errores de consulta no se sustituyen por valores cero. La actividad conserva un estado de error visible separado.
+- No se cambió el esquema SQLite ni se agregó persistencia/caché. `PSA.renderTodo()` actualiza el panel desde datos confirmados. Los indicadores son de consulta y no alteran tarjetas, relaciones ni posiciones.
+- Navegador aislado en Chromium: `probarFase7Dashboard()` aprobó **28 comprobaciones** (conteos, archivo, categorías, vencimientos inclusivos, prioridades, progreso 0/20/100 y tablero vacío, actividad, errores, casos sin proyecto/tablero/etapas, accesos, navegación y actualización tras guardar).
+- Regresión Chromium: fases 3, movimientos, arrastre, fase 5 y fase 6 aprobaron **42, 26, 25, 18 y 24 comprobaciones**; fase 7 aprobó 28. A 390, 768 y 1280 px, la página y las grillas del panel no desbordan horizontalmente.
+- Node: `node --test --test-reporter=spec tests\db.test.cjs`: **37 aprobadas, 0 fallidas**. Todos los módulos y tests JavaScript pasaron `node --check`; `git diff --check` no reportó errores.
+- La base habitual no se conectó para las pruebas; se utilizaron bases sintéticas. No hubo cambios de esquema, dependencias, operaciones remotas ni commits.
+
 ### Calendario e historial de actividad (fase 6) — 2026-10-25
 - Se agregaron vistas mensual, semanal y agenda basadas en `tarjetas.inicio` y `tarjetas.vencimiento`, con navegación por período y acción Hoy. Las tarjetas aparecen en las fechas definidas; una fecha de calendario se mantiene como texto `AAAA-MM-DD`, sin conversión UTC. El calendario abre el editor ya existente y tiene acceso al historial de cada tarjeta.
 - Los indicadores del Kanban distinguen sin vencimiento, vencimiento cumplido, vencimiento próximo y vencido, con texto además del color. Próximo se define como vencimiento desde hoy hasta seis días después (siete fechas inclusivas); vencida es fecha anterior a hoy en tarjeta no completada.
