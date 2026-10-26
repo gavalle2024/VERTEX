@@ -49,7 +49,7 @@ VERTEX/
 │   └── vertex.db           # Base inicial; la app permite otra carpeta
 ├── tests/
 │   ├── db.test.cjs         # Regresión SQLite, migraciones y operaciones
-│   └── tableros.browser.js # Pruebas DOM aisladas de fases 3–7
+│   └── tableros.browser.js # Pruebas DOM aisladas de fases 3–8
 ├── docs/
 │   ├── arquitectura.md     # Diseño y decisiones técnicas
 │   └── cambios.md          # Registro de cambios (changelog)
@@ -99,12 +99,14 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 - `PSA.DB.estado` y el evento `psa:db-state` centralizan conexión, ubicación, ocupación y errores. Reutilizarlos para actualizar la UI.
 - No prometer acceso por una ruta escrita ni mostrar nombres de carpeta como rutas absolutas. El navegador requiere selección autorizada.
 - `PSA.DB.transaccion(tx => …)` admite una función síncrona: reutilizar `tx.run/all` con parámetros y registrar eventos dentro de la misma operación. Nunca escribir entidades y actividad por separado.
+- Las ediciones idempotentes de catálogos, tableros, listas, tarjetas y asignaciones no deben actualizar `updated_at`, reescribir relaciones idénticas ni registrar actividad; repetir el orden actual de listas también es no-op. Cubrirlo con pruebas sintéticas sin abrir la base habitual.
 - Habilitar FK en cada instancia y después de exportar: sql.js reinicia pragmas al reabrir durante `export()`.
 - No aplicar migraciones de archivos existentes sin consentimiento y respaldo exacto verificado. Rechazar versiones futuras, esquemas ajenos y cambios externos durante el proceso.
 - Reutilizar `PSA.Trabajo` en la UI, sin SQL ni persistencia alternativa en las vistas. El editor único `trabajo-dialog` sirve a tableros, listas y tarjetas; no duplicar formularios ni notificaciones.
 - Mantener el detalle archivado en solo lectura y exigir contenedores activos para restaurar hijos. Diferenciar ordenar columnas (`reordenarListas`) de mover tarjetas (`moverTarjeta`/`moverTarjetas`); usar IDs explícitos y nunca alterar tareas no seleccionadas. El movimiento múltiple debe validar todo y ejecutarse en una sola transacción.
 - Para DnD, usar únicamente el control `.work-drag-handle` como origen y `moverTarjeta(id, listaId, posicion)` para persistir posiciones. El arrastre es siempre individual; la selección múltiple conserva sus acciones explícitas. Mantener una alternativa por teclado y no declarar soporte táctil sin implementarlo y probarlo.
 - Reiniciar la selección de tableros solo después de un cambio de base confirmado. El Esc del diálogo no debe cancelar una edición histórica de proyecto.
+- El calendario agrupa eventos indexados por fecha, conserva los datos y usa roles ARIA que correspondan a la estructura real; no declarar `role="grid"` sin filas, celdas y navegación de teclado implementadas.
 
 ---
 
@@ -189,7 +191,7 @@ El panel fase 7 es de lectura y no modifica el esquema. Filtra entidades archiva
 
 ## Compatibilidad y configuración
 
-- Las fases 2 a 7 están implementadas; Mis tareas, historial visual ampliado de proyectos y soporte táctil siguen pendientes. El panel, calendario e historial básico están disponibles en la navegación.
+- Las fases 2 a 8 están implementadas; Mis tareas, historial visual ampliado de proyectos y soporte táctil siguen pendientes. El panel, calendario e historial básico están disponibles en la navegación.
 
 - No hay fallback a localStorage ni migración automática de proyectos antiguos.
 - Las migraciones de esquema SQLite 0 → 1 → 2 → 3 y 1 → 2 → 3, 2 → 3 requieren consentimiento y respaldo. No confundirlas con migración de formatos localStorage.

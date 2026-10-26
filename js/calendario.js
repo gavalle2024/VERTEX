@@ -51,15 +51,30 @@
     };
   }
 
-  function _eventosPorFecha(tarjetas, clave) {
-    return tarjetas.flatMap(tarjeta => {
-      const inicio = tarjeta.inicio === clave;
-      const vencimiento = tarjeta.vencimiento === clave;
-      if (!inicio && !vencimiento) return [];
-      return [{ tarjeta, etiqueta: inicio && vencimiento ? 'Inicio y vencimiento' : inicio ? 'Inicio' : 'Vencimiento' }];
-    }).sort((a, b) =>
+  function _crearEventosPorFecha(tarjetas) {
+    const porFecha = new Map();
+    tarjetas.forEach(tarjeta => {
+      const inicio = tarjeta.inicio;
+      const vencimiento = tarjeta.vencimiento;
+      const fechas = new Set([tarjeta.inicio, tarjeta.vencimiento].filter(Boolean));
+      fechas.forEach(clave => {
+        const eventos = porFecha.get(clave) || [];
+        eventos.push({
+          tarjeta,
+          etiqueta: inicio === clave && vencimiento === clave
+            ? 'Inicio y vencimiento' : inicio === clave ? 'Inicio' : 'Vencimiento'
+        });
+        porFecha.set(clave, eventos);
+      });
+    });
+    porFecha.forEach(eventos => eventos.sort((a, b) =>
       (a.tarjeta.vencimiento || '9999-12-31').localeCompare(b.tarjeta.vencimiento || '9999-12-31') ||
-      a.tarjeta.titulo.localeCompare(b.tarjeta.titulo, 'es'));
+      a.tarjeta.titulo.localeCompare(b.tarjeta.titulo, 'es')));
+    return porFecha;
+  }
+
+  function _eventosPorFecha(porFecha, clave) {
+    return porFecha.get(clave) || [];
   }
 
   function _tarjetaEvento(evento) {
@@ -87,19 +102,22 @@
     </article>`;
   }
 
-  function _celda(fecha, mesActual, tarjetas) {
+  function _celda(fecha, mesActual, porFecha) {
     const clave = _clave(fecha);
-    const eventos = _eventosPorFecha(tarjetas, clave);
+    const eventos = _eventosPorFecha(porFecha, clave);
     const hoy = clave === _hoy();
     const visibles = eventos.slice(0, 3).map(_tarjetaEvento).join('');
     const restantes = eventos.slice(3);
-    return `<section class="calendar-day${mesActual ? '' : ' calendar-day-outside'}${hoy ? ' calendar-day-today' : ''}"
-      aria-label="${escape(PSA.formatFecha(clave))}${hoy ? ', hoy' : ''}, ${eventos.length} tareas">
+    const nombreDia = new Intl.DateTimeFormat('es-AR', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    }).format(fecha);
+    return `<div class="calendar-day${mesActual ? '' : ' calendar-day-outside'}${hoy ? ' calendar-day-today' : ''}"
+      role="group" aria-label="${escape(nombreDia)}${hoy ? ', hoy' : ''}, ${eventos.length} tareas">
       <h4><time datetime="${clave}">${fecha.getDate()}</time>${hoy ? '<span class="calendar-today-label">Hoy</span>' : ''}</h4>
       ${visibles || '<p class="calendar-empty-day">—</p>'}
       ${restantes.length ? `<details class="calendar-more"><summary>+ ${restantes.length} tareas más</summary>
         ${restantes.map(_tarjetaEvento).join('')}</details>` : ''}
-    </section>`;
+    </div>`;
   }
 
   function _diasSemana(fecha) {
@@ -113,42 +131,41 @@
     return new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(referencia);
   }
 
-  function _renderMes(tarjetas) {
+  function _renderMes(porFecha) {
     const primero = new Date(referencia.getFullYear(), referencia.getMonth(), 1);
     const inicio = _sumar(primero, -((primero.getDay() + 6) % 7));
     const dias = Array.from({ length: 42 }, (_, indice) => _sumar(inicio, indice));
     $('calendario-periodo').textContent = _periodoMes();
-    $('calendario-contenido').innerHTML = `<div class="calendar-grid calendar-month" role="grid" aria-label="Calendario mensual">
+    $('calendario-contenido').innerHTML = `<div class="calendar-grid calendar-month" role="group" aria-label="Calendario mensual">
       ${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(dia =>
-        `<div class="calendar-weekday" role="columnheader">${dia}</div>`).join('')}
-      ${dias.map(fecha => _celda(fecha, fecha.getMonth() === referencia.getMonth(), tarjetas)).join('')}
+        `<div class="calendar-weekday">${dia}</div>`).join('')}
+      ${dias.map(fecha => _celda(fecha, fecha.getMonth() === referencia.getMonth(), porFecha)).join('')}
     </div>`;
   }
 
-  function _renderSemana(tarjetas) {
+  function _renderSemana(porFecha) {
     const dias = _diasSemana(referencia);
     $('calendario-periodo').textContent = PSA.formatFecha(_clave(dias[0])) + ' – ' + PSA.formatFecha(_clave(dias[6]));
-    $('calendario-contenido').innerHTML = `<div class="calendar-grid calendar-week" role="grid" aria-label="Calendario semanal">
+    $('calendario-contenido').innerHTML = `<div class="calendar-grid calendar-week" role="group" aria-label="Calendario semanal">
       ${dias.map(fecha => `<div class="calendar-weekday">${escape(new Intl.DateTimeFormat('es-AR', {
         weekday: 'long', day: 'numeric', month: 'short'
       }).format(fecha))}</div>`).join('')}
-      ${dias.map(fecha => _celda(fecha, true, tarjetas)).join('')}
+      ${dias.map(fecha => _celda(fecha, true, porFecha)).join('')}
     </div>`;
   }
 
-  function _renderAgenda(tarjetas) {
+  function _renderAgenda(porFecha) {
     const inicio = new Date(referencia.getFullYear(), referencia.getMonth(), 1);
     const fin = new Date(referencia.getFullYear(), referencia.getMonth() + 1, 0);
-    const fechas = Array.from(new Set(tarjetas.flatMap(tarjeta =>
-      [tarjeta.inicio, tarjeta.vencimiento].filter(fecha => fecha && fecha >= _clave(inicio) && fecha <= _clave(fin)))))
-      .sort();
+    const fechas = Array.from(porFecha.keys())
+      .filter(fecha => fecha >= _clave(inicio) && fecha <= _clave(fin)).sort();
     $('calendario-periodo').textContent = _periodoMes();
     $('calendario-contenido').innerHTML = fechas.length
       ? `<ol class="calendar-agenda">${fechas.map(clave => `<li>
           <h4><time datetime="${clave}">${escape(new Intl.DateTimeFormat('es-AR', {
             weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
           }).format(_desdeClave(clave)))}</time></h4>
-          <div class="calendar-agenda-events">${_eventosPorFecha(tarjetas, clave).map(_tarjetaEvento).join('')}</div>
+            <div class="calendar-agenda-events">${_eventosPorFecha(porFecha, clave).map(_tarjetaEvento).join('')}</div>
         </li>`).join('')}</ol>`
       : '<p class="empty">No hay tareas fechadas en este período.</p>';
   }
@@ -157,11 +174,12 @@
     if (!$('calendario-contenido')) return;
     vista = $('calendario-vista').value || vista;
     const tarjetas = _tarjetas();
+    const porFecha = _crearEventosPorFecha(tarjetas);
     const conFecha = tarjetas.filter(tarjeta => tarjeta.inicio || tarjeta.vencimiento).length;
     $('calendario-estado').textContent = `${conFecha} tarjetas activas con al menos una fecha. Las tarjetas sin fechas no aparecen en el calendario.`;
-    if (vista === 'semana') _renderSemana(tarjetas);
-    else if (vista === 'agenda') _renderAgenda(tarjetas);
-    else _renderMes(tarjetas);
+    if (vista === 'semana') _renderSemana(porFecha);
+    else if (vista === 'agenda') _renderAgenda(porFecha);
+    else _renderMes(porFecha);
   }
 
   function _moverPeriodo(direccion) {

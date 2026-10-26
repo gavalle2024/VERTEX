@@ -660,7 +660,7 @@ tr:hover td { background: #f7f9fc; }
 .calendar-grid { display: grid; gap: 5px; }
 .calendar-month { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .calendar-week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-weekday { padding: 6px 4px; color: var(--navy); font-size: 12px; font-weight: 700; text-align: center; }
+.calendar-weekday { min-width: 0; padding: 6px 4px; color: var(--navy); font-size: 12px; font-weight: 700; text-align: center; overflow-wrap: anywhere; }
 .calendar-day { min-width: 0; min-height: 112px; padding: 7px; border: 1px solid var(--border); border-radius: 5px; background: #fff; overflow: hidden; }
 .calendar-day h4 { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 0 0 5px; color: var(--navy); font-size: 13px; }
 .calendar-day-outside { background: var(--bg); color: var(--muted); }

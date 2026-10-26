@@ -106,6 +106,8 @@ No hay `localStorage`, fallback JSON ni migración automática de formatos antig
 
 Las operaciones relacionales usan una transacción SQL en una candidata y registran actividad antes de persistir. Se validan las FK antes de confirmar; un error revierte o descarta toda la operación. Se vuelven a habilitar FK tras `export()` porque sql.js reinicia pragmas al reabrir la conexión.
 
+Las ediciones de responsables, etiquetas, tableros, listas y tarjetas comparan los campos normalizados con el registro confirmado. Si no hay diferencias, no actualizan `updated_at`, no reescriben relaciones idénticas ni generan un evento; la reasignación idéntica y el orden de listas sin cambios también son no-op. Las operaciones que sí cambian datos siguen registrando actividad dentro de la misma transacción.
+
 ### Proyectos: [proyectos.js](../js/proyectos.js)
 
 CRUD con validación de nombre, responsable y fecha de inicio, avance entre 0 y 100, edición cancelable con Esc y confirmación de eliminación. Guardado y eliminación esperan la persistencia y notifican los errores explícitamente.
@@ -127,7 +129,7 @@ IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selecc
 - `guardarTablero`, `guardarLista`, `guardarTarjeta` y `archivar` esperan transacción y escritura confirmadas antes de renderizar/notificar. Los errores se registran y se muestran; un guardado fallido conserva el diálogo y sus datos.
 - `getTableros`, `getListas`, `getTarjetas`, `getResponsables` y `DB.getProyectos` son las únicas fuentes de datos. La UI no ejecuta SQL, no recrea tablas y no usa localStorage.
 - El mismo `<dialog>` nativo cambia sus campos según entidad. Cuenta con etiquetas, título/contexto accesibles, contención de foco, Esc/cancelación con confirmación de descarte y retorno de foco a un elemento existente tras renderizar.
-- `PSA.Calendario` deriva las vistas mensual, semanal y de agenda desde tarjetas confirmadas, agrupa cada tarjeta por fecha de inicio y/o vencimiento y reutiliza el editor de tarjetas. No persiste ni convierte fechas de calendario a instantes.
+- `PSA.Calendario` deriva las vistas mensual, semanal y de agenda desde tarjetas confirmadas, indexa cada fecha una vez por render, agrupa cada tarjeta por fecha de inicio y/o vencimiento y reutiliza el editor de tarjetas. No persiste ni convierte fechas de calendario a instantes. El calendario usa grupos con nombre accesible, no una grilla ARIA sin su estructura y navegación correspondientes.
 - `PSA.Actividad` consulta historial reciente o filtrado por tablero/tarjeta, en páginas de 100 filas; las descripciones se insertan como texto escapado y los botones abren la tarjeta existente cuando aún está disponible.
 - Archivados y descendientes de contenedores archivados son de solo lectura. Restaurar un padre no altera marcas propias de hijos. El selector de proyecto se bloquea al editar tablero; una categoría de lista con tarjetas también se bloquea según el contrato existente.
 - El estado global de DB bloquea acciones de tablero y editor mientras se escribe. Los atajos históricos no interfieren con el diálogo. Un cambio de base confirmado reinicia selección y filtros; una conexión fallida no los descarta.
@@ -138,6 +140,12 @@ IIFE bajo `PSA.Tableros`, cargada antes de `app.js`. Mantiene únicamente selecc
 - La selección conserva IDs, se ordena por etapa y posición visibles, admite seleccionar toda una etapa y cancelar. Una barra informa la cantidad y ofrece movimiento relativo por tarjeta o un destino común. No se acepta selección vacía, selección archivada ni destino inválido.
 - `moverTarjeta` se conserva para el movimiento individual y actualiza solo ese ID en los traslados al final de una etapa; las posiciones de origen y destino no seleccionadas se preservan. `moverTarjetas` valida el lote, tablero único y listas activas antes de mutar, asigna nuevas posiciones únicas contiguas al final de cada destino en orden visual y no cambia las posiciones de tarjetas restantes. Eventos y completitud se escriben dentro de una sola transacción. Un error de validación/escritura no publica cambios parciales. El éxito vuelve a renderizar y limpia selección.
 - Los controles explícitos de movimiento por etapa y posición se mantienen como alternativa al arrastre.
+
+### Auditoría de rendimiento y robustez
+
+La prueba sintética Chromium usa 20 tableros, cinco listas por tablero, diez tarjetas por lista y 4000 eventos. En una ejecución local de tres renders completos, el tiempo mediano pasó de 1067,1 ms a 411,9 ms tras indexar los eventos del calendario por fecha; la vista conserva las 2000 apariciones de fechas del conjunto. Es una medición de referencia, no un umbral garantizado en otros dispositivos.
+
+La regresión Node cubre transacciones, rollback, fallos de `write()`/`close()`, migraciones con respaldo, validaciones y operaciones no-op. Exportar SQLite descarga una copia de la base confirmada; no hay restauración automática en la interfaz. La vuelta a una copia exportada requiere una operación manual sobre archivos, con la app cerrada y previa verificación de la copia. No hay garantía absoluta ante daño físico o cierre forzado durante una escritura.
 
 La fase 5 no incluye Mis tareas, calendario ni historial visual. La actividad relacional sigue escribiéndose dentro de las transacciones. El avance de proyectos sigue siendo manual. Las etiquetas se muestran en distintivos flexibles; no se limita la cantidad máxima por tarjeta.
 
@@ -239,16 +247,16 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 
 ## Verificación
 
-[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 7 aprobó **37 pruebas**, incluidas migración/rollback sintéticos y actividad de tarjeta.
+[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 8 aprobó **38 pruebas**, incluidas migración/rollback sintéticos, actividad y operaciones idempotentes.
 
 ```powershell
 node --test tests\db.test.cjs
 ```
 
-Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
+Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación, operaciones no-op y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
 
-Las pruebas DOM en Chromium aprobaron: fases 3–7 **42, 26, 25, 18, 24 y 28 comprobaciones**, respectivamente. La fase 7 cubre conteos, archivos, fechas, prioridad, barra de progreso (0/20/100 y tablero vacío), errores, accesos rápidos, actualización al guardar, navegación por teclado y preservación del orden. La página y las grillas históricas se midieron a 390, 768 y 1280 px sin desbordamiento horizontal.
+Las pruebas DOM en Chromium aprobaron: interfaz de fase 3, movimientos, arrastre y fases 5, 6 y 7: **42, 26, 25, 18, 25 y 28 comprobaciones**. La fase 6 incluye la validación estructural ARIA del calendario; la fase 7 cubre conteos, archivos, fechas, prioridad, barra de progreso (0/20/100 y tablero vacío), errores, accesos rápidos, actualización al guardar, navegación por teclado y preservación del orden. Las vistas mensual, semanal y agenda se midieron a 390, 768 y 1280 px; no hay desbordamiento de página ni grilla tras corregir los nombres largos de días.
 
 ## Evolución propuesta
 
-El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 7 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado de proyectos permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
+El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 8 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado de proyectos permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).

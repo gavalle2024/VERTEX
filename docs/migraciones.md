@@ -141,9 +141,9 @@ node --test --test-reporter=spec tests\db.test.cjs
 
 Las pruebas usan SQLite real y handles/IndexedDB simulados. Cubren legado, consentimiento pendiente, respaldo exacto y fallido, rollback SQL, cancelación, reintento, cambios externos, versión futura, esquema ajeno, restauración entre sesiones, entidades, asignaciones, etiquetas, movimientos, archivo jerárquico, restricciones y eventos.
 
-Última ejecución de fase 6: `node --test --test-reporter=spec tests\db.test.cjs`: **37 pruebas aprobadas, 0 fallidas**. Incluye migraciones sintéticas 1 → 3 y 2 → 3, rollback, título de evento histórico, fechas de tarjeta, no-op de actividad, persistencia y regresión de movimientos. Los módulos JS y el test de navegador se validan con `node --check`.
+Última ejecución de fase 8: `node --test --test-reporter=spec tests\db.test.cjs`: **38 pruebas aprobadas, 0 fallidas**. Incluye migraciones sintéticas 1 → 3 y 2 → 3, rollback, título de evento histórico, fechas de tarjeta, actividad, operaciones no-op, persistencia y regresión de movimientos. Los módulos JS y el test de navegador se validan con `node --check`.
 
-La prueba de navegador aislada `probarFase5Tableros()` comprueba catálogos UI, asignaciones múltiples, prioridad, búsquedas, filtros individuales y combinados, estado vacío, conservación de orden, drag bloqueado y movimiento explícito de selección oculta. `probarFase6Seguimiento()` comprueba 24 casos de las vistas mensuales/semanales/agenda, navegación, fechas, filtros temporales, historial, no-op y actualización tras guardar; resultados en [cambios.md](cambios.md).
+La prueba de navegador aislada `probarFase5Tableros()` comprueba catálogos UI, asignaciones múltiples, prioridad, búsquedas, filtros individuales y combinados, estado vacío, conservación de orden, drag bloqueado y movimiento explícito de selección oculta. `probarFase6Seguimiento()` comprueba 25 casos de las vistas mensuales/semanales/agenda, navegación, fechas, filtros temporales, historial, no-op, estructura ARIA y actualización tras guardar; resultados en [cambios.md](cambios.md).
 
 La prueba que lee la base habitual crea únicamente una copia en memoria y verifica que el original permanece idéntico. Las migraciones v1 → v3 y v2 → v3 se probaron con binarios sintéticos y respaldo simulado; no se ejecutaron sobre la base habitual.
 

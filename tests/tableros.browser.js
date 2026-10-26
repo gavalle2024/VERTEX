@@ -960,6 +960,11 @@ window.probarFase6Seguimiento = async function () {
   check(document.querySelectorAll('#calendario-contenido .calendar-open-card').length >= 3 &&
     !document.querySelector('#calendario-contenido .calendar-open-card[data-card-id="' + sinFecha + '"]'),
   'La vista mensual incluye tareas fechadas y excluye las que no tienen fecha');
+  check(!document.querySelector('#calendario-contenido [role="grid"]') &&
+    document.querySelector('#calendario-contenido .calendar-grid[role="group"][aria-label]') &&
+    Array.from(document.querySelectorAll('#calendario-contenido .calendar-day'))
+      .every(dia => dia.getAttribute('role') === 'group' && dia.getAttribute('aria-label')),
+  'El calendario expone grupos y nombres accesibles sin declarar una grilla ARIA incompleta');
   check(document.querySelector('#calendario-contenido').textContent.includes('Inicio y vencimiento'),
     'Una tarjeta con inicio y vencimiento en el mismo día se muestra una sola vez');
   check(document.querySelector('#calendario-contenido').textContent.includes('Ya venció') &&

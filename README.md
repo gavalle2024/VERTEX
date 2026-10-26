@@ -2,7 +2,7 @@
 
 Aplicación web para registrar, seguir y analizar proyectos de implementación de la **Policía de Seguridad Aeroportuaria**, sin backend ni instalación de paquetes.
 
-**Evolución visual en curso:** están implementadas las fases 1 a 7: persistencia relacional, Kanban, responsables y etiquetas, prioridades, búsqueda y filtros, calendario, historial y panel de control. Mis tareas y el historial visual ampliado de proyectos siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
+**Evolución visual en curso:** están implementadas las fases 1 a 8: persistencia relacional, Kanban, responsables y etiquetas, prioridades, búsqueda y filtros, calendario, historial, panel de control y auditoría sintética de robustez. Mis tareas y el historial visual ampliado de proyectos siguen pendientes. El arrastre nativo se ofrece para puntero de escritorio; el soporte táctil no se implementó ni verificó. Ver [estado por fases](docs/evolucion-visual.md) y [migraciones y recuperación](docs/migraciones.md).
 
 ## Qué permite hacer
 
@@ -150,7 +150,7 @@ node --check js\dashboard.js
 
 Las pruebas descargan la misma versión de sql.js usada por la app, ejecutan SQLite real y simulan los handles y permisos de archivos sin tocar la base del proyecto.
 
-La suite Node actual cubre **37 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas. La suite cubre accesos, conteos, vencimientos, progreso y errores sin mutar posiciones; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+La suite Node actual cubre **38 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
 
 ## Documentación
 

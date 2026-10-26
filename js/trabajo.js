@@ -51,8 +51,10 @@
         throw new Error('No se pueden asignar ' + tipo + (tipo === 'etiquetas' ? ' inactivas' : ' inactivos') + ' a una tarjeta.');
       }
     }
-    tx.run(`DELETE FROM ${asociacion} WHERE tarjeta_id=?`, [tarjetaId]);
-    return unicos;
+    const cambiaron = unicos.length !== existentes.length ||
+      unicos.some(id => !existentes.includes(id));
+    if (cambiaron) tx.run(`DELETE FROM ${asociacion} WHERE tarjeta_id=?`, [tarjetaId]);
+    return { ids: unicos, cambiaron };
   }
 
   function _fecha(valor) {
@@ -129,26 +131,31 @@
     const anterior = entrada.id ? _registro(tx, tabla, entrada.id) : null;
     const fila = preparar({ ...anterior, ...entrada }, anterior);
     fila.id = anterior ? anterior.id : PSA.genId();
+    const cambios = anterior ? campos.filter(campo => fila[campo] !== anterior[campo]) : campos;
     if (anterior) {
-      tx.run(`UPDATE ${tabla} SET ${campos.map(c => c + '=?').join(',')},updated_at=${AHORA} WHERE id=?`,
-        [...campos.map(c => fila[c]), fila.id]);
+      if (cambios.length) {
+        tx.run(`UPDATE ${tabla} SET ${campos.map(c => c + '=?').join(',')},updated_at=${AHORA} WHERE id=?`,
+          [...campos.map(c => fila[c]), fila.id]);
+      }
     } else {
       tx.run(`INSERT INTO ${tabla} (id,${campos.join(',')}) VALUES (${['id', ...campos].map(() => '?').join(',')})`,
         [fila.id, ...campos.map(c => fila[c])]);
     }
-    return { fila, anterior };
+    return { fila, anterior, cambios };
   }
 
   function guardarResponsable(entrada) {
     return PSA.DB.transaccion(tx => {
-      const { fila, anterior } = _guardar(tx, 'responsables', entrada, ['nombre'], p => ({
+      const { fila, anterior, cambios } = _guardar(tx, 'responsables', entrada, ['nombre'], p => ({
         nombre: _nombreCatalogo(p.nombre, 'nombre', 120)
       }));
       _nombreUnico(tx, 'responsables', fila.nombre, fila.id);
       if (anterior && anterior.nombre !== fila.nombre) {
         tx.run(`UPDATE proyectos SET responsable=?,updated_at=${AHORA} WHERE responsable_id=?`, [fila.nombre, fila.id]);
       }
-      _evento(tx, {}, anterior ? 'responsable_modificado' : 'responsable_creado', fila.nombre);
+      if (!anterior || cambios.length) {
+        _evento(tx, {}, anterior ? 'responsable_modificado' : 'responsable_creado', fila.nombre);
+      }
       return fila.id;
     });
   }
@@ -158,6 +165,7 @@
       const proyecto = _activo(_registro(tx, 'proyectos', proyectoId));
       const id = _responsable(tx, responsableId, proyecto.responsable_id);
       const nombre = id ? _registro(tx, 'responsables', id).nombre : proyecto.responsable;
+      if ((proyecto.responsable_id || null) === id && proyecto.responsable === nombre) return proyectoId;
       tx.run(`UPDATE proyectos SET responsable_id=?,responsable=?,updated_at=${AHORA} WHERE id=?`,
         [id, nombre, proyectoId]);
       _evento(tx, { proyecto_id: proyectoId }, 'responsable_cambiado',
@@ -168,7 +176,7 @@
 
   function guardarTablero(entrada) {
     return PSA.DB.transaccion(tx => {
-      const { fila, anterior } = _guardar(tx, 'tableros', entrada,
+      const { fila, anterior, cambios } = _guardar(tx, 'tableros', entrada,
         ['proyecto_id', 'nombre', 'descripcion'], (p, previo) => {
           if (previo && p.proyecto_id !== previo.proyecto_id) throw new Error('No se puede trasladar un tablero a otro proyecto.');
           _activo(_registro(tx, 'proyectos', p.proyecto_id));
@@ -186,14 +194,16 @@
             [PSA.genId(), fila.id, nombre, CATEGORIAS[posicion], posicion]);
         });
       }
-      _evento(tx, contexto, anterior ? 'tablero_modificado' : 'tablero_creado', fila.nombre);
+      if (!anterior || cambios.length) {
+        _evento(tx, contexto, anterior ? 'tablero_modificado' : 'tablero_creado', fila.nombre);
+      }
       return fila.id;
     });
   }
 
   function guardarLista(entrada) {
     return PSA.DB.transaccion(tx => {
-      const { fila, anterior } = _guardar(tx, 'listas', entrada,
+      const { fila, anterior, cambios } = _guardar(tx, 'listas', entrada,
         ['tablero_id', 'nombre', 'categoria', 'posicion'], (p, previo) => {
           _tablero(tx, p.tablero_id);
           if (previo) {
@@ -212,21 +222,25 @@
               'SELECT coalesce(max(posicion),-1)+1 AS posicion FROM listas WHERE tablero_id=?', [p.tablero_id])[0].posicion
           };
         });
-      _evento(tx, _contexto(tx, 'listas', fila), anterior ? 'lista_modificada' : 'lista_creada', fila.nombre);
+      if (!anterior || cambios.length) {
+        _evento(tx, _contexto(tx, 'listas', fila), anterior ? 'lista_modificada' : 'lista_creada', fila.nombre);
+      }
       return fila.id;
     });
   }
 
   function guardarEtiqueta(entrada) {
     return PSA.DB.transaccion(tx => {
-      const { fila, anterior } = _guardar(tx, 'etiquetas', entrada, ['nombre', 'color'], p => {
+      const { fila, anterior, cambios } = _guardar(tx, 'etiquetas', entrada, ['nombre', 'color'], p => {
         if (typeof p.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(p.color)) {
           throw new Error('El color debe ser hexadecimal de seis dígitos.');
         }
         return { nombre: _nombreCatalogo(p.nombre, 'nombre', 60), color: p.color.toLowerCase() };
       });
       _nombreUnico(tx, 'etiquetas', fila.nombre, fila.id);
-      _evento(tx, {}, anterior ? 'etiqueta_modificada' : 'etiqueta_creada', fila.nombre);
+      if (!anterior || cambios.length) {
+        _evento(tx, {}, anterior ? 'etiqueta_modificada' : 'etiqueta_creada', fila.nombre);
+      }
       return fila.id;
     });
   }
@@ -287,27 +301,33 @@
       let responsablesDespues = responsablesAntes;
       let etiquetasDespues = etiquetasAntes;
       if (Object.hasOwn(entrada, 'responsables')) {
-        const responsables = _validarAsignaciones(tx, entrada.responsables, 'responsables',
+        const asignacion = _validarAsignaciones(tx, entrada.responsables, 'responsables',
           'tarjeta_responsables', fila.id, responsablesAntes, 'responsables');
-        responsablesDespues = responsables;
-        for (const id of responsables) {
-          tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
+        responsablesDespues = asignacion.ids;
+        if (asignacion.cambiaron) {
+          for (const id of asignacion.ids) {
+            tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
+          }
         }
       } else if (Object.hasOwn(entrada, 'responsable_id')) {
         const responsables = fila.responsable_id ? [fila.responsable_id] : [];
-        const validos = _validarAsignaciones(tx, responsables, 'responsables',
+        const asignacion = _validarAsignaciones(tx, responsables, 'responsables',
           'tarjeta_responsables', fila.id, responsablesAntes, 'responsables');
-        responsablesDespues = validos;
-        for (const id of validos) {
-          tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
+        responsablesDespues = asignacion.ids;
+        if (asignacion.cambiaron) {
+          for (const id of asignacion.ids) {
+            tx.run('INSERT INTO tarjeta_responsables (tarjeta_id,responsable_id) VALUES (?,?)', [fila.id, id]);
+          }
         }
       }
       if (Object.hasOwn(entrada, 'etiquetas')) {
-        const etiquetas = _validarAsignaciones(tx, entrada.etiquetas, 'etiquetas',
+        const asignacion = _validarAsignaciones(tx, entrada.etiquetas, 'etiquetas',
           'tarjeta_etiquetas', fila.id, etiquetasAntes, 'etiquetas');
-        etiquetasDespues = etiquetas;
-        for (const id of etiquetas) {
-          tx.run('INSERT INTO tarjeta_etiquetas (tarjeta_id,etiqueta_id) VALUES (?,?)', [fila.id, id]);
+        etiquetasDespues = asignacion.ids;
+        if (asignacion.cambiaron) {
+          for (const id of asignacion.ids) {
+            tx.run('INSERT INTO tarjeta_etiquetas (tarjeta_id,etiqueta_id) VALUES (?,?)', [fila.id, id]);
+          }
         }
       }
       if (!anterior) {
@@ -392,6 +412,7 @@
           ids.some(id => !existentes.some(fila => fila.id === id))) {
         throw new Error('El orden debe incluir cada lista activa del tablero una sola vez.');
       }
+      if (existentes.every((fila, indice) => fila.id === ids[indice])) return true;
       _ordenar(tx, 'listas', ids);
       _evento(tx, { proyecto_id: tablero.proyecto_id, tablero_id: tablero.id }, 'listas_reordenadas', JSON.stringify(ids));
       return true;

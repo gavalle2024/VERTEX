@@ -953,6 +953,62 @@ test('validaciones rechazan fechas imposibles, colores CSS, padres inexistentes 
   assert.equal(app.trabajo.getTarjetas().length, 0);
 });
 
+test('guardar entidades y repetir un orden sin cambios conserva timestamps y no agrega actividad', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const responsableId = await app.trabajo.guardarResponsable({ nombre: 'Responsable' });
+  await app.trabajo.asignarResponsableProyecto('p1', responsableId);
+  const etiquetaId = await app.trabajo.guardarEtiqueta({ nombre: 'Etiqueta', color: '#123456' });
+  const tableroId = await app.trabajo.guardarTablero({
+    proyecto_id: 'p1', nombre: 'Tablero', descripcion: 'Descripción'
+  });
+  const lista = app.trabajo.getListas(tableroId)[0];
+  const tarjetaId = await app.trabajo.guardarTarjeta({
+    lista_id: lista.id, titulo: 'Tarea', responsables: [responsableId], etiquetas: [etiquetaId]
+  });
+  const orden = app.trabajo.getListas(tableroId).map(fila => fila.id);
+  const marcador = '2000-01-01T00:00:00.000Z';
+  await app.db.transaccion(tx => {
+    for (const [tabla, id] of [
+      ['proyectos', 'p1'], ['responsables', responsableId], ['etiquetas', etiquetaId],
+      ['tableros', tableroId], ['listas', lista.id], ['tarjetas', tarjetaId]
+    ]) tx.run(`UPDATE ${tabla} SET updated_at=? WHERE id=?`, [marcador, id]);
+  });
+  const actividadInicial = app.trabajo.getActividad().length;
+  const tarjeta = app.trabajo.getTarjetas().find(fila => fila.id === tarjetaId);
+
+  await app.trabajo.guardarResponsable({ id: responsableId, nombre: 'Responsable' });
+  await app.trabajo.asignarResponsableProyecto('p1', responsableId);
+  await app.trabajo.guardarEtiqueta({ id: etiquetaId, nombre: 'Etiqueta', color: '#123456' });
+  await app.trabajo.guardarTablero({
+    id: tableroId, proyecto_id: 'p1', nombre: 'Tablero', descripcion: 'Descripción'
+  });
+  await app.trabajo.guardarLista({
+    id: lista.id, tablero_id: tableroId, nombre: lista.nombre, categoria: lista.categoria
+  });
+  await app.trabajo.guardarTarjeta({
+    id: tarjeta.id, lista_id: tarjeta.lista_id, titulo: tarjeta.titulo,
+    descripcion: tarjeta.descripcion, prioridad: tarjeta.prioridad, inicio: tarjeta.inicio,
+    vencimiento: tarjeta.vencimiento, observaciones: tarjeta.observaciones,
+    completada: tarjeta.completada, responsables: tarjeta.responsables.map(fila => fila.id),
+    etiquetas: tarjeta.etiquetas.map(fila => fila.id)
+  });
+  await app.trabajo.reordenarListas(tableroId, orden);
+
+  assert.equal(app.trabajo.getActividad().length, actividadInicial);
+  assert.equal(app.trabajo.getTarjetas()[0].responsables.length, 1);
+  assert.equal(app.trabajo.getTarjetas()[0].etiquetas.length, 1);
+  assert.deepEqual(Array.from(app.db.consultar(
+    `SELECT updated_at FROM proyectos WHERE id=? UNION ALL
+     SELECT updated_at FROM responsables WHERE id=? UNION ALL
+     SELECT updated_at FROM etiquetas WHERE id=? UNION ALL
+     SELECT updated_at FROM tableros WHERE id=? UNION ALL
+     SELECT updated_at FROM listas WHERE id=? UNION ALL
+     SELECT updated_at FROM tarjetas WHERE id=?`,
+    ['p1', responsableId, etiquetaId, tableroId, lista.id, tarjetaId]
+  ), fila => fila.updated_at), Array(6).fill(marcador));
+});
+
 test('asignación explícita y renombre conservan responsables históricos no vinculados', async () => {
   const app = await entornoNuevo();
   await app.db.saveProyecto(proyecto, true);
