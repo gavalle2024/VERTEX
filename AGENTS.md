@@ -95,6 +95,7 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 - **`'use strict'`** al inicio de cada módulo JS.
 - **Variables CSS** en `:root` de `styles.css`; no valores de color hardcodeados en JS.
 - Textos en **español (Argentina)** con acentos correctos (UTF-8).
+- La CSP necesita soporte para `wasm-unsafe-eval` además de File System Access API; Chrome/Edge ≥ 86 por sí solo no garantiza compatibilidad con WebAssembly bajo esta política.
 - `saveProyecto()` y `deleteProyecto()` son asíncronas: siempre esperarlas antes de limpiar formularios, renderizar o notificar éxito.
 - No sustituir una base inválida por una vacía. Validar una instancia candidata antes de reemplazar la conexión.
 - No permitir operaciones concurrentes ni escrituras con debounce. La instancia visible solo cambia después de `write()` y `close()` exitosos.
@@ -117,7 +118,10 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 - Toda salida HTML de datos del usuario pasa por `PSA.escapeHtml()` (prevención XSS).
 - Las consultas SQL usan parámetros posicionales `?` (prevención de SQL injection en sql.js).
 - No se envían datos a ningún servidor externo. La aplicación de navegador carga sql.js desde CDN; `tests/db.test.cjs` usa los artefactos locales incluidos y no hace solicitudes de red.
-- El `Content-Security-Policy` ideal para despliegue en servidor: `default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; connect-src https://cdnjs.cloudflare.com`.
+- `index.html` aplica `default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'`.
+- `wasm-unsafe-eval` se requiere para compilar el WASM de sql.js; no habilitar `unsafe-eval` ni `unsafe-inline`. Los colores configurables se limitan a hex validado y se insertan como reglas en la hoja CSS local; los demás estilos son clases o controles nativos.
+- `frame-ancestors` no es aplicable desde una meta CSP. En despliegues HTTP(S), configurarlo además como encabezado de respuesta (normalmente `frame-ancestors 'none'`). La CSP meta no sustituye encabezados del servidor.
+- Los manejadores de la SPA activa se registran desde JavaScript con `addEventListener`, delegación y `data-action`; no agregar atributos `on*` ni bloques `<script>` inline. `gestion_proyectos_psa.html` es el monolito histórico independiente y no se carga desde `index.html`.
 
 ---
 
@@ -184,7 +188,7 @@ El panel fase 7 es de lectura y no modifica el esquema. Filtra entidades archiva
 
 ### Agregar una nueva vista/tab
 1. Crear `<section id="v-nueva" class="view">` en `index.html`.
-2. Agregar `<button data-view="v-nueva" onclick="PSA.cambiarTab('v-nueva', this)">` en `<nav class="tabs">`.
+2. Agregar `<button data-view="v-nueva">` en `<nav class="tabs">`; el listener delegado de `app.js` resuelve la navegación.
 3. Crear el módulo en `js/nueva-vista.js`.
 4. Agregar `<script src="js/nueva-vista.js">` antes de `app.js`.
 5. Llamar al render desde `PSA.renderTodo()` en `app.js`.

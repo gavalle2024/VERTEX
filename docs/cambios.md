@@ -6,6 +6,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-11-07
 
+### Seguridad de interfaz y CSP (A2)
+- Se eliminaron los 19 atributos de evento inline de `index.html` y se centralizaron las acciones estáticas por delegación `data-action` en `app.js`; pestañas y filtros usan listeners JavaScript.
+- CSP meta estricta: `default-src 'self'`, scripts de `self` y cdnjs, `wasm-unsafe-eval` para el compilador WASM de sql.js, estilos/imágenes/fuentes de `self`, conexiones a cdnjs para WASM, `object-src 'none'`, `base-uri 'self'` y `form-action 'self'`. Sin `unsafe-inline` ni `unsafe-eval`.
+- Se removieron los 15 usos de atributos `style` generados por las vistas. Progresos usan `<progress>` nativo y clases; los colores validados de etiquetas se insertan en la hoja CSS local mediante CSSOM. `frame-ancestors` se documentó como encabezado HTTP porque no se aplica desde `<meta>`.
+- `tests/tableros.browser.js` agrega siete verificaciones de CSP, ausencia de inline, inicialización de sql.js/WASM, color CSSOM y ejecución única de listener.
+- Chromium aislado con IndexedDB interceptado y archivos/base sintéticos: suites existentes **42, 26, 18, 25, 25 y 28** comprobaciones; seguridad **7**. Sin aperturas ni escrituras a `db/vertex.db`.
+- La referencia histórica `gestion_proyectos_psa.html` queda intacta, con 12 handlers inline y un script inline; no es parte de la SPA activa ni se carga desde su entrypoint.
+
 ### Entorno de pruebas Node reproducible sin CDN
 - `tests/db.test.cjs` inicializa sql.js 1.10.2 desde `tests/vendor/sql.js/1.10.2/` (`sql-wasm.js` y `sql-wasm.wasm`); coincide con la versión de producción y no descarga archivos durante la ejecución.
 - Se incorpora la distribución oficial mínima y su licencia, sin agregar dependencias npm instaladas ni cambiar la carga CDN de la aplicación.

@@ -247,6 +247,32 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 - **Seguridad:** escape HTML de textos, parámetros SQL y permisos del navegador. Los proyectos no se transmiten a servidores. No hay autenticación ni roles.
 - **Cierre:** el navegador puede advertir sobre una operación en curso; no puede garantizarse persistencia frente a cierre forzado, caída del sistema o fallo físico. Mantener respaldos.
 
+### Content Security Policy y eventos
+
+La SPA activa declara en `index.html`:
+
+```text
+default-src 'self';
+script-src 'self' https://cdnjs.cloudflare.com 'wasm-unsafe-eval';
+style-src 'self';
+img-src 'self';
+font-src 'self';
+connect-src https://cdnjs.cloudflare.com;
+object-src 'none';
+base-uri 'self';
+form-action 'self'
+```
+
+Los scripts propios salen de `self`; cdnjs se limita al script de sql.js 1.10.2 y a la carga del archivo WASM. `wasm-unsafe-eval` habilita compilación WebAssembly en los navegadores compatibles, sin permitir `eval` o `new Function`. No se usan `unsafe-inline` ni `unsafe-eval`. Imágenes y fuentes no necesitan orígenes externos. No se declaran `frame-src` ni `report-uri` porque la aplicación no los utiliza.
+
+El requisito histórico de File System Access API Chrome/Edge ≥ 86 no garantiza soporte de `wasm-unsafe-eval`; se requiere un navegador que implemente esa fuente CSP. La validación se ejecutó en Chromium compatible.
+
+`frame-ancestors` no se admite en la directiva CSP de una etiqueta `<meta>`. En despliegue HTTP(S), el servidor debe enviar la política como encabezado e incluir `frame-ancestors 'none'` (o el origen de embedding aprobado); abrir la app como archivo local no permite configurar ese encabezado.
+
+Los 19 handlers inline de la SPA activa se reemplazaron por listeners de `app.js` y `data-action`; la navegación usa delegación sobre `data-view`. Los módulos de vistas conservan listeners de ciclo de vida registrados una sola vez. Las barras dinámicas son elementos `<progress>` nativos y clases CSS. Para los colores configurables, `tableros.js` valida `#RRGGBB` y añade una única regla por color a `css/styles.css` con CSSOM; una prueba Chromium confirma que la regla propia se aplica con `style-src 'self'` y que no se genera atributo `style`.
+
+`gestion_proyectos_psa.html` conserva 12 handlers y un bloque inline como documento histórico independiente; no es cargado por `index.html` y no está cubierto por la CSP de la SPA.
+
 ## Verificación
 
 [tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+ y los archivos `tests/vendor/sql.js/1.10.2/sql-wasm.js` y `sql-wasm.wasm`. La versión local es sql.js 1.10.2, idéntica a producción. Node inicializa el motor con el binario WASM leído del disco: no hace `fetch`, no contacta cdnjs y no requiere Internet una vez que estos archivos están presentes. Los handles e IndexedDB son simulados y todas las bases son sintéticas; la suite no lee ni modifica `db/vertex.db`. La ejecución de fase 8 aprobó **38 pruebas**, incluidas migración/rollback, actividad y operaciones idempotentes.

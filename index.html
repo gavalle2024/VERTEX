@@ -4,8 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Sistema de gestión de proyectos e implementación — URSA I del Este, Policía de Seguridad Aeroportuaria">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Gestión de Proyectos — URSA I del Este / PSA</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link id="app-styles" rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
@@ -19,7 +20,7 @@
     <div class="header-db no-print">
       <span id="db-status" aria-live="polite"></span>
       <button id="btn-db-connect" class="btn btn-sm hidden"
-              onclick="PSA.gestionarConexionDB()">Seleccionar carpeta de base de datos</button>
+              data-action="db-connect">Seleccionar carpeta de base de datos</button>
       <span id="db-detail" aria-live="polite"></span>
     </div>
   </div>
@@ -31,17 +32,12 @@
      ══════════════════════════════════════════ -->
 <nav class="tabs" role="tablist" aria-label="Navegación principal">
   <button id="tab-dashboard" class="active" role="tab" aria-selected="true" aria-controls="v-dashboard" tabindex="0"
-          data-view="v-dashboard"
-          onclick="PSA.cambiarTab('v-dashboard', this)">Panel de control</button>
+      data-view="v-dashboard">Panel de control</button>
   <button id="tab-proyectos" role="tab" aria-selected="false" aria-controls="v-proyectos" tabindex="-1"
-          data-view="v-proyectos"
-          onclick="PSA.cambiarTab('v-proyectos', this)">Proyectos</button>
-  <button id="tab-tableros" role="tab" aria-selected="false" aria-controls="v-tableros" tabindex="-1" data-view="v-tableros"
-          onclick="PSA.cambiarTab('v-tableros', this)">Tableros</button>
-  <button id="tab-calendario" role="tab" aria-selected="false" aria-controls="v-calendario" tabindex="-1" data-view="v-calendario"
-          onclick="PSA.cambiarTab('v-calendario', this)">Calendario</button>
-  <button id="tab-actividad" role="tab" aria-selected="false" aria-controls="v-actividad" tabindex="-1" data-view="v-actividad"
-          onclick="PSA.cambiarTab('v-actividad', this)">Actividad</button>
+      data-view="v-proyectos">Proyectos</button>
+    <button id="tab-tableros" role="tab" aria-selected="false" aria-controls="v-tableros" tabindex="-1" data-view="v-tableros">Tableros</button>
+    <button id="tab-calendario" role="tab" aria-selected="false" aria-controls="v-calendario" tabindex="-1" data-view="v-calendario">Calendario</button>
+    <button id="tab-actividad" role="tab" aria-selected="false" aria-controls="v-actividad" tabindex="-1" data-view="v-actividad">Actividad</button>
 </nav>
 
 <!-- ══════════════════════════════════════════
@@ -61,9 +57,9 @@
     <h2 id="connect-title">Base de datos requerida</h2>
     <p id="connect-msg">Seleccione la carpeta que contiene <strong>vertex.db</strong>.</p>
     <button id="connect-btn" class="btn btn-primary"
-            onclick="PSA.gestionarConexionDB()">Seleccionar carpeta</button>
+          data-action="db-connect">Seleccionar carpeta</button>
     <button id="connect-folder-btn" class="btn btn-ghost hidden"
-            onclick="PSA.gestionarConexionDB(true)">Seleccionar otra carpeta</button>
+          data-action="db-connect-folder">Seleccionar otra carpeta</button>
     <p class="connect-hint">
       Puede elegir <code>db/</code> del proyecto o cualquier carpeta autorizada.
       Se usará <code>vertex.db</code>; si no existe, se pedirá confirmar su creación.
@@ -80,8 +76,8 @@
     <p>Se conservarán todos los proyectos. Antes de actualizar se creará y verificará
       un respaldo exacto del archivo original. Si no se puede respaldar, no se aplicará la migración.</p>
     <button id="migration-confirm" class="btn btn-primary"
-            onclick="PSA.confirmarMigracion()">Crear respaldo y actualizar</button>
-    <button class="btn btn-ghost" onclick="PSA.cancelarMigracion()">Cancelar</button>
+          data-action="migration-confirm">Crear respaldo y actualizar</button>
+        <button class="btn btn-ghost" data-action="migration-cancel">Cancelar</button>
     <p class="connect-hint">No cierre la ventana ni abra la base con otra aplicación durante la actualización.
       Para volver a la versión anterior, use una copia del respaldo con esa versión de VERTEX.</p>
   </div>
@@ -282,10 +278,8 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary"
-                onclick="PSA.Proyectos.guardarProyecto()">Guardar proyecto</button>
-        <button class="btn btn-ghost"
-                onclick="PSA.Proyectos.limpiarForm()">Limpiar / Cancelar</button>
+        <button class="btn btn-primary" type="button" data-action="project-save">Guardar proyecto</button>
+        <button class="btn btn-ghost" type="button" data-action="project-clear">Limpiar / Cancelar</button>
       </div>
     </div>
 
@@ -296,13 +290,12 @@
       <div class="filters no-print">
         <label>
           Buscar
-          <input type="search" id="filtro-p-texto"
-                 oninput="PSA.Proyectos.renderTabla()"
+             <input type="search" id="filtro-p-texto"
                  placeholder="Nombre, responsable o división…">
         </label>
         <label>
           Estado
-          <select id="filtro-p-estado" onchange="PSA.Proyectos.renderTabla()">
+          <select id="filtro-p-estado">
             <option value="">Todos</option>
             <option>En curso</option>
             <option>Completado</option>
@@ -312,7 +305,7 @@
         </label>
         <label>
           Implementación
-          <select id="filtro-p-implementacion" onchange="PSA.Proyectos.renderTabla()">
+          <select id="filtro-p-implementacion">
             <option value="">Todas</option>
             <option>No iniciado</option>
             <option>Piloto / Prueba</option>
@@ -322,15 +315,11 @@
             <option>Discontinuado</option>
           </select>
         </label>
-        <button class="btn btn-ghost"
-                onclick="PSA.Proyectos.limpiarFiltros()">Limpiar filtros</button>
-        <button class="btn btn-gold"
-                onclick="PSA.Proyectos.exportarCSV()">Exportar CSV</button>
-        <button class="btn btn-ghost"
-                onclick="PSA.Proyectos.exportarDB()"
+        <button class="btn btn-ghost" type="button" data-action="project-filters-clear">Limpiar filtros</button>
+        <button class="btn btn-gold" type="button" data-action="project-export-csv">Exportar CSV</button>
+        <button class="btn btn-ghost" type="button" data-action="project-export-db"
                 title="Exportar la base de datos SQLite completa (.db)">Exportar DB</button>
-        <button class="btn btn-ghost"
-                onclick="window.print()">Imprimir</button>
+        <button class="btn btn-ghost" type="button" data-action="page-print">Imprimir</button>
       </div>
 
       <div class="tabla-count" id="tabla-count"></div>
@@ -527,7 +516,7 @@
 
 <!-- ══════════════════════════════════════════
      SCRIPTS  (orden importante)
-     1. sql.js desde CDN
+    1. sql.js desde CDN (permitido por la CSP)
      2. Capa de base de datos
      3. Módulos de funcionalidad
      4. Inicialización principal

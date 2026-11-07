@@ -1086,6 +1086,48 @@ window.probarFase6Seguimiento = async function () {
   return { resultados };
 };
 
+window.verificarSeguridadInterfaz = function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const politica = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || '';
+  check(politica.includes("default-src 'self'") && politica.includes("script-src 'self'") &&
+    politica.includes("style-src 'self'") && politica.includes("object-src 'none'") &&
+    politica.includes("'wasm-unsafe-eval'") && !politica.includes("'unsafe-inline'") &&
+    !politica.includes("'unsafe-eval'"), 'CSP restrictiva sin excepciones inseguras');
+  const eventosInline = Array.from(document.querySelectorAll('*')).some(elemento =>
+    Array.from(elemento.attributes).some(atributo => /^on[a-z]+$/i.test(atributo.name)));
+  check(!eventosInline, 'La interfaz activa no tiene manejadores inline');
+  check(!Array.from(document.scripts).some(script => !script.src && script.textContent.trim()),
+    'La interfaz activa no tiene bloques de script inline');
+  check(document.querySelectorAll('[style]').length === 0, 'La interfaz renderizada no tiene estilos inline');
+  check(PSA.DB.useSQLite, 'sql.js y WebAssembly inicializaron bajo CSP');
+
+  const distintivo = document.querySelector('.work-badge[class*="work-color-"]');
+  const claseColor = distintivo && Array.from(distintivo.classList)
+    .find(clase => clase.startsWith('work-color-'));
+  const hojaEstilos = document.getElementById('app-styles').sheet;
+  const colorRegla = claseColor && Array.from(hojaEstilos.cssRules)
+    .filter(regla => regla.selectorText === '.' + claseColor);
+  check(!!distintivo && !!colorRegla && colorRegla.length === 1 &&
+    getComputedStyle(distintivo).backgroundColor !== 'rgba(0, 0, 0, 0)',
+  'Los colores validados usan una sola regla CSSOM de la hoja local');
+
+  const guardarOriginal = PSA.Proyectos.guardarProyecto;
+  let llamadas = 0;
+  try {
+    PSA.Proyectos.guardarProyecto = () => { llamadas++; };
+    document.querySelector('[data-action="project-save"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  } finally {
+    PSA.Proyectos.guardarProyecto = guardarOriginal;
+  }
+  check(llamadas === 1, 'El listener delegado ejecuta una acción una sola vez');
+  return { resultados };
+};
+
 window.probarFase7Dashboard = async function () {
   const resultados = [];
   const check = (valor, nombre) => {

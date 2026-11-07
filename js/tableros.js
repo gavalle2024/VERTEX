@@ -12,9 +12,25 @@
   let formularioInicial = '';
   let tarjetasSeleccionadas = new Set();
   let arrastre = null;
+  const coloresInsertados = new Set();
   const $ = id => document.getElementById(id);
   const e = valor => PSA.escapeHtml(valor);
   const dialog = () => $('trabajo-dialog');
+
+  function _claseColor(color) {
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) return '';
+    const hexadecimal = color.toLowerCase();
+    const rgb = parseInt(hexadecimal.slice(1), 16);
+    const luminancia = 0.299 * (rgb >> 16 & 255) + 0.587 * (rgb >> 8 & 255) + 0.114 * (rgb & 255);
+    const clase = 'work-color-' + hexadecimal.slice(1) + (luminancia < 145 ? '-light' : '-dark');
+    if (!coloresInsertados.has(clase)) {
+      const hoja = $('app-styles').sheet;
+      if (!hoja) return '';
+      hoja.insertRule(`.${clase}{background-color:${hexadecimal};color:${luminancia < 145 ? '#fff' : '#111'}}`, hoja.cssRules.length);
+      coloresInsertados.add(clase);
+    }
+    return ' ' + clase;
+  }
 
   function _boton(texto, accion, id, deshabilitado = false) {
     return `<button type="button" class="btn btn-ghost btn-sm" data-accion="${accion}"
@@ -120,9 +136,8 @@
         ${_boton(fila.archivado ? 'Reactivar' : 'Desactivar', 'archivo-responsable', fila.id, PSA.DB.ocupado)}</span>
       </div>`).join('') || '<p class="empty">No hay responsables para esta búsqueda.</p>';
     $('catalogo-etiquetas').innerHTML = etiquetas.map(fila => {
-      const color = /^#[0-9a-f]{6}$/i.test(fila.color) ? ` style="background-color:${e(fila.color)}"` : '';
       return `<div class="catalog-item">
-      <span><span class="catalog-color"${color} aria-hidden="true"></span>
+      <span><span class="catalog-color${_claseColor(fila.color)}" aria-hidden="true"></span>
         ${e(fila.nombre)}${fila.archivado ? ' · Inactiva' : ''}</span>
       <span class="actions">${_boton('Editar', 'etiqueta', fila.id, PSA.DB.ocupado)}
         ${_boton(fila.archivado ? 'Reactivar' : 'Desactivar', 'archivo-etiqueta', fila.id, PSA.DB.ocupado)}</span>
@@ -153,11 +168,7 @@
     const etiquetas = tarjeta.etiquetas || [];
     const responsables = tarjeta.responsables || [];
     const etiquetasHTML = etiquetas.map(etiqueta => {
-      const valido = /^#[0-9a-f]{6}$/i.test(etiqueta.color);
-      const color = valido ? parseInt(etiqueta.color.slice(1), 16) : 0xffffff;
-      const luminancia = 0.299 * (color >> 16 & 255) + 0.587 * (color >> 8 & 255) + 0.114 * (color & 255);
-      const estilo = valido ? ` style="background-color:${e(etiqueta.color)};color:${luminancia < 145 ? '#fff' : '#111'}"` : '';
-      return `<span class="work-badge${etiqueta.archivado ? ' work-badge-inactive' : ''}"${estilo}>${e(etiqueta.nombre)}${etiqueta.archivado ? ' · Inactiva' : ''}</span>`;
+      return `<span class="work-badge${etiqueta.archivado ? ' work-badge-inactive' : ''}${_claseColor(etiqueta.color)}">${e(etiqueta.nombre)}${etiqueta.archivado ? ' · Inactiva' : ''}</span>`;
     }).join('');
     const responsablesHTML = responsables.map(responsable =>
       `<span class="work-badge${responsable.archivado ? ' work-badge-inactive' : ''}">${e(responsable.nombre)}${responsable.archivado ? ' · Inactivo' : ''}</span>`

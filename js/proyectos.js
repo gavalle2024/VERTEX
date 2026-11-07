@@ -211,22 +211,23 @@
       tr.innerHTML = `
         <td>
           <strong>${e(p.nombre)}</strong>
-          ${p.division ? `<br><span style="color:var(--muted);font-size:11px;">${e(p.division)}</span>` : ''}
+          ${p.division ? `<br><span class="project-division">${e(p.division)}</span>` : ''}
         </td>
         <td>${e(p.responsable)}</td>
-        <td style="white-space:nowrap;">${f(p.inicio)}</td>
-        <td style="white-space:nowrap;">${f(p.meta)}</td>
-        <td style="white-space:nowrap;">${f(p.fin)}</td>
+        <td class="project-date">${f(p.inicio)}</td>
+        <td class="project-date">${f(p.meta)}</td>
+        <td class="project-date">${f(p.fin)}</td>
         <td><span class="tag ${CLASE_ESTADO[p.estado] || ''}">${e(p.estado)}</span></td>
-        <td style="min-width:90px;">
-          <div class="bar-bg"><div class="bar-fill" style="width:${avance}%;"></div></div>
-          <div style="font-size:11px;margin-top:2px;">${avance}%</div>
+        <td class="project-progress-cell">
+          <progress class="bar-bg project-table-progress" max="100" value="${avance}"
+            aria-label="Avance de ${e(p.nombre)}">${avance}%</progress>
+          <div class="project-table-progress-value">${avance}%</div>
         </td>
         <td><span class="tag ${CLASE_IMPL[p.implementacion] || 'imp-no'}">${e(p.implementacion || 'No iniciado')}</span></td>
         <td><span class="tag ${CLASE_CUMPL[p.cumplimiento] || ''}">${e(p.cumplimiento)}</span></td>
-        <td style="max-width:180px;font-size:11.5px;">${e(p.objetivo)}</td>
-        <td style="max-width:160px;font-size:11.5px;">${e(p.resultado)}</td>
-        <td class="row-actions no-print" style="white-space:nowrap;">
+        <td class="project-objective">${e(p.objetivo)}</td>
+        <td class="project-result">${e(p.resultado)}</td>
+        <td class="row-actions no-print">
         </td>`;
       const acciones = tr.querySelector('.row-actions');
       [

@@ -25,20 +25,19 @@
   let hayProyectosActivos = false;
   let datosDisponibles = false;
 
-  function _stat(num, lbl, color) {
+  function _stat(num, lbl, tono = '') {
     return `<div class="stat">
-      <div class="num"${color ? ' style="color:' + color + '"' : ''}>${num}</div>
+      <div class="num${tono ? ' num-' + tono : ''}">${num}</div>
       <div class="lbl">${lbl}</div>
     </div>`;
   }
 
-  function _barra(label, pct, colorFill) {
+  function _barra(label, pct, tono = '') {
     return `<div class="project-progress">
       <div class="project-progress-label">${label}</div>
-      <div class="bar-bg" role="progressbar" aria-label="${escape(label)}" aria-valuemin="0"
-        aria-valuemax="100" aria-valuenow="${pct}">
-        <div class="bar-fill" style="width:${pct}%;${colorFill ? 'background:' + colorFill : ''}"></div>
-      </div>
+      <progress class="bar-bg${tono ? ' project-progress-' + tono : ''}" role="progressbar"
+        aria-label="${escape(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"
+        max="100" value="${pct}">${pct}%</progress>
       <div class="project-progress-value">${pct}%</div>
     </div>`;
   }
@@ -66,12 +65,12 @@
 
     $('dash-estado').innerHTML =
       _stat(total, 'Proyectos totales') +
-      _stat(porEstado['En curso'], 'En curso', 'var(--navy)') +
-      _stat(porEstado['Completado'], 'Completados', 'var(--green)') +
-      _stat(porEstado['Demorado'], 'Demorados', 'var(--amber)');
+      _stat(porEstado['En curso'], 'En curso', 'navy') +
+      _stat(porEstado['Completado'], 'Completados', 'green') +
+      _stat(porEstado['Demorado'], 'Demorados', 'amber');
     $('dash-barras').innerHTML = `<div class="project-progress-grid">
       ${_barra('Proyectos cumplidos en término (sobre evaluables)', pctEnTermino)}
-      ${_barra('Avance promedio manual de los proyectos', avgAvance, 'var(--navy2)')}
+      ${_barra('Avance promedio manual de los proyectos', avgAvance, 'navy')}
     </div>`;
 
     const demora = proyectos.filter(proyecto => proyecto.cumplimiento === 'Cumplido con demora').length;
@@ -80,11 +79,11 @@
     const pendEval = proyectos.filter(proyecto =>
       proyecto.cumplimiento === 'En curso (pendiente de evaluar)').length;
     $('dash-cumplimiento').innerHTML =
-      _stat(enTermino, 'En término', 'var(--green)') +
-      _stat(demora, 'Con demora', 'var(--amber)') +
-      _stat(parcial, 'Parcialmente', 'var(--amber)') +
-      _stat(noCumpl, 'No cumplidos', 'var(--red)') +
-      _stat(pendEval, 'Pendientes de eval.', 'var(--muted)');
+      _stat(enTermino, 'En término', 'green') +
+      _stat(demora, 'Con demora', 'amber') +
+      _stat(parcial, 'Parcialmente', 'amber') +
+      _stat(noCumpl, 'No cumplidos', 'red') +
+      _stat(pendEval, 'Pendientes de eval.', 'muted');
     $('dash-implementacion').innerHTML = IMPL_ORDEN.map(valor =>
       _stat(porImpl[valor] || 0, escape(valor))).join('');
 
@@ -143,9 +142,9 @@
       _stat(activos.length, 'Tarjetas activas') +
       _stat(pendientes.length, 'Pendientes') +
       _stat(enCurso.length, 'En curso') +
-      _stat(completadas.length, 'Completadas', 'var(--green)') +
-      _stat(seguimiento.atrasadas.length, 'Atrasadas', 'var(--red)') +
-      _stat(seguimiento.proximos7.length, 'Vencen en 7 días', 'var(--amber)') +
+      _stat(completadas.length, 'Completadas', 'green') +
+      _stat(seguimiento.atrasadas.length, 'Atrasadas', 'red') +
+      _stat(seguimiento.proximos7.length, 'Vencen en 7 días', 'amber') +
       _stat(otrasEtapas.length, 'En revisión, bloqueadas u otras etapas');
 
     $('dash-indicadores-ayuda').textContent =
@@ -225,9 +224,9 @@
             : 'Sin tarjetas activas'}</span>
         </div>
         ${total
-          ? `<div class="bar-bg" role="progressbar" aria-label="Progreso de ${escape(tablero.nombre)}"
-              aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progreso}">
-              <div class="bar-fill" style="width:${progreso}%"></div></div>
+              ? `<progress class="bar-bg dashboard-board-progress-bar" role="progressbar"
+                aria-label="Progreso de ${escape(tablero.nombre)}" aria-valuemin="0" aria-valuemax="100"
+                aria-valuenow="${progreso}" max="100" value="${progreso}">${progreso}%</progress>
             <span class="dashboard-progress-value">${progreso}%</span>`
           : '<p class="work-meta">No hay porcentaje mientras el tablero esté vacío.</p>'}
       </li>`;

@@ -111,6 +111,16 @@ La app está diseñada para **una instancia escritora por base**. No implementa 
 
 En la aplicación de navegador, sql.js 1.10.2 y su WASM se cargan desde cdnjs; si no están disponibles, se bloquea el uso y se informa el error. Los datos de proyectos no se envían a un servidor. Las pruebas Node usan una copia local de la misma versión y no acceden a la red.
 
+## Seguridad de la interfaz
+
+`index.html` aplica una CSP por metadato: `default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'`. Los manejadores se registran desde JavaScript con `addEventListener` y `data-action`; no se permiten scripts ni atributos de estilo inline.
+
+`wasm-unsafe-eval` se limita a habilitar la compilación WebAssembly que requiere sql.js 1.10.2. No habilita `eval`, `new Function` ni JavaScript evaluado desde texto. El CDN solo se permite para el script sql.js y la descarga de su WASM. Los estilos dinámicos de progreso usan `<progress>` y clases; los colores hexadecimales validados de etiquetas se incorporan como reglas CSSOM a la hoja local autorizada.
+
+La CSP requiere un navegador que implemente `wasm-unsafe-eval`; el requisito histórico de File System Access API (Chrome/Edge 86+) por sí solo no garantiza esa directiva. La validación automatizada se realizó en Chromium compatible.
+
+`frame-ancestors` no se puede aplicar desde una CSP `<meta>`. En un despliegue HTTP(S), se debe enviar también como encabezado de respuesta, por ejemplo `Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. El archivo histórico [gestion_proyectos_psa.html](gestion_proyectos_psa.html) es una referencia independiente, no se carga desde la SPA activa y no forma parte de esta política.
+
 No incluye autenticación, roles, vista de historial de cambios, importación Excel/CSV, sincronización multiusuario ni alertas automáticas por vencimiento. La infraestructura relacional registra actividad de sus operaciones, pero su interfaz y la integración de eventos del formulario histórico de proyectos corresponden a fases posteriores.
 
 ## Estructura

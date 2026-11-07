@@ -79,6 +79,32 @@ document.querySelector('nav.tabs').addEventListener('keydown', event => {
   PSA.cambiarTab(botones[siguiente].dataset.view, botones[siguiente]);
 });
 
+document.querySelector('nav.tabs').addEventListener('click', event => {
+  const boton = event.target.closest('button[data-view]');
+  if (boton) PSA.cambiarTab(boton.dataset.view, boton);
+});
+
+document.addEventListener('click', event => {
+  const boton = event.target.closest('button[data-action]');
+  if (!boton) return;
+  switch (boton.dataset.action) {
+    case 'db-connect': PSA.gestionarConexionDB(); break;
+    case 'db-connect-folder': PSA.gestionarConexionDB(true); break;
+    case 'migration-confirm': PSA.confirmarMigracion(); break;
+    case 'migration-cancel': PSA.cancelarMigracion(); break;
+    case 'project-save': PSA.Proyectos.guardarProyecto(); break;
+    case 'project-clear': PSA.Proyectos.limpiarForm(); break;
+    case 'project-filters-clear': PSA.Proyectos.limpiarFiltros(); break;
+    case 'project-export-csv': PSA.Proyectos.exportarCSV(); break;
+    case 'project-export-db': PSA.Proyectos.exportarDB(); break;
+    case 'page-print': window.print(); break;
+  }
+});
+
+document.getElementById('filtro-p-texto').addEventListener('input', PSA.Proyectos.renderTabla);
+document.getElementById('filtro-p-estado').addEventListener('change', PSA.Proyectos.renderTabla);
+document.getElementById('filtro-p-implementacion').addEventListener('change', PSA.Proyectos.renderTabla);
+
 /** Renderiza todos los módulos de la aplicación desde el estado confirmado. */
 PSA.renderTodo = function () {
   PSA.Proyectos.renderTabla();
