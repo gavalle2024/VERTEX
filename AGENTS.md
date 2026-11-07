@@ -22,7 +22,7 @@ Corre directamente en el navegador desde `index.html` **sin servidor back-end**.
 | Estilos | CSS3 puro (sin frameworks) — `css/styles.css` |
 | Lógica | JavaScript ES6+ (sin bundler, sin transpilador) |
 | Base de datos | **SQLite 3** (`vertex.db` en carpeta autorizada) |
-| Motor SQL | **sql.js 1.10.2** (WASM desde CDN) |
+| Motor SQL | **sql.js 1.10.2** (WASM desde CDN en navegador; copia local en pruebas Node) |
 | Acceso al archivo | **File System Access API** (Chrome/Edge ≥ 86) |
 | Handles persistidos | **IndexedDB** (`psa_fs_v1/handles/vertex_db`): `{archivo, carpeta}`, compatible con handles de archivo anteriores |
 
@@ -49,7 +49,9 @@ VERTEX/
 │   └── vertex.db           # Base inicial; la app permite otra carpeta
 ├── tests/
 │   ├── db.test.cjs         # Regresión SQLite, migraciones y operaciones
-│   └── tableros.browser.js # Pruebas DOM aisladas de fases 3–8
+│   ├── tableros.browser.js # Pruebas DOM aisladas de fases 3–8
+│   └── vendor/
+│       └── sql.js/1.10.2/  # Artefactos locales sql.js para Node: JS, WASM y licencia
 ├── docs/
 │   ├── arquitectura.md     # Diseño y decisiones técnicas
 │   └── cambios.md          # Registro de cambios (changelog)
@@ -114,7 +116,7 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 
 - Toda salida HTML de datos del usuario pasa por `PSA.escapeHtml()` (prevención XSS).
 - Las consultas SQL usan parámetros posicionales `?` (prevención de SQL injection en sql.js).
-- No se envían datos a ningún servidor externo. El único recurso externo es sql.js desde CDN.
+- No se envían datos a ningún servidor externo. La aplicación de navegador carga sql.js desde CDN; `tests/db.test.cjs` usa los artefactos locales incluidos y no hace solicitudes de red.
 - El `Content-Security-Policy` ideal para despliegue en servidor: `default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; connect-src https://cdnjs.cloudflare.com`.
 
 ---
@@ -202,8 +204,9 @@ El panel fase 7 es de lectura y no modifica el esquema. Filtra entidades archiva
 
 ## Validación
 
-- Sin bundler ni instalación de paquetes: `node --test tests\db.test.cjs` con Node.js 22+ e internet.
-- Las pruebas descargan sql.js 1.10.2, ejecutan SQLite real y simulan handles, permisos e IndexedDB. Nunca usar `db/vertex.db` para pruebas destructivas.
+- Sin bundler ni instalación de paquetes: `node --test tests\db.test.cjs` con Node.js 22+, incluso sin conexión a Internet.
+- La suite Node carga `tests/vendor/sql.js/1.10.2/sql-wasm.js` y `sql-wasm.wasm` (sql.js 1.10.2, igual a producción), ejecuta SQLite real y simula handles, permisos e IndexedDB. Todas las bases son sintéticas; no leer, abrir ni modificar `db/vertex.db` desde pruebas.
+- Para verificar que la suite no depende de red: `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs`; el resultado esperado es ninguna coincidencia. Las pruebas browser aisladas conservan el modo de carga de la aplicación y pueden requerir el CDN.
 - Verificar sintaxis con `node --check` y comprobar UI en Chrome/Edge para selección, permisos, reconexión y cambio de carpeta.
 - `tests/tableros.browser.js` se ejecuta solo en una página aislada sin conexión real; incluye flujos de fases 3 a 7, simula archivos e IndexedDB y no se incluye en `index.html`.
 - Los filtros no deben modificar relaciones, posiciones ni orden persistido. Con filtros activos, arrastre y reordenamiento en etapa deshabilitados; si una selección incluye tarjetas ocultas, pedir la confirmación explícita existente antes de mover.

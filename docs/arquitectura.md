@@ -24,11 +24,13 @@ js/proyectos.js       js/dashboard.js   js/tableros.js
    +-----------------------+-----------js/trabajo.js
    +-------- js/db.js -----+----------------+
                  |
-           sql.js / WASM
-                 |
+            sql.js / WASM
+                   |
       File System Access API -> carpeta elegida / vertex.db
                  |
       IndexedDB -> handles autorizados, no proyectos
+
+Node tests -> tests/vendor/sql.js/1.10.2 (JS + WASM local; sin CDN)
 ```
 
 ## Módulos y responsabilidades
@@ -41,7 +43,7 @@ La cabecera mantiene visible la opción de cambiar de carpeta. Se muestran el no
 
 ### Persistencia: [db.js](../js/db.js)
 
-Encapsulado en una IIFE bajo `PSA.DB`. Utiliza sql.js 1.10.2 desde cdnjs.
+Encapsulado en una IIFE bajo `PSA.DB`. La aplicación de navegador utiliza sql.js 1.10.2 desde cdnjs; ese mecanismo no se modifica para habilitar las pruebas locales.
 
 Se carga primero [migraciones.js](../js/migraciones.js) (`PSA.Esquema`) y después de DB se carga [trabajo.js](../js/trabajo.js) (`PSA.Trabajo`). El detalle de esquema, APIs y recuperación está en [migraciones.md](migraciones.md). La fase 3 agrega presentación sobre estas APIs sin cambiar la persistencia.
 
@@ -247,11 +249,13 @@ El esquema 1 agrega descripción, prioridad, archivo y vínculo opcional de resp
 
 ## Verificación
 
-[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+, descarga sql.js 1.10.2 y ejecuta SQLite real con handles/IndexedDB simulados, sin escribir en la base del proyecto. La ejecución de fase 8 aprobó **38 pruebas**, incluidas migración/rollback sintéticos, actividad y operaciones idempotentes.
+[tests/db.test.cjs](../tests/db.test.cjs) usa el runner incorporado de Node.js 22+ y los archivos `tests/vendor/sql.js/1.10.2/sql-wasm.js` y `sql-wasm.wasm`. La versión local es sql.js 1.10.2, idéntica a producción. Node inicializa el motor con el binario WASM leído del disco: no hace `fetch`, no contacta cdnjs y no requiere Internet una vez que estos archivos están presentes. Los handles e IndexedDB son simulados y todas las bases son sintéticas; la suite no lee ni modifica `db/vertex.db`. La ejecución de fase 8 aprobó **38 pruebas**, incluidas migración/rollback, actividad y operaciones idempotentes.
 
 ```powershell
 node --test tests\db.test.cjs
 ```
+
+No se necesita `npm install`: la copia versionada está en `tests/vendor/sql.js/1.10.2/` e incluye la licencia del paquete. Para comprobar que el archivo de pruebas no contiene referencias de red: `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs`; no debe producir resultados. Si se actualiza sql.js, actualizar los archivos locales, mantener la misma versión que `index.html` y revisar este procedimiento. Las pruebas browser siguen usando una página aislada con la aplicación; al cargarla con `index.html`, el CDN de producción continúa siendo necesario.
 
 Cubre CRUD y reapertura, binario SQLite, espera de cierre, exclusión de operaciones, errores de escritura y cierre, reintento, cancelación, archivos corruptos o incompatibles, creación confirmada, conexiones antiguas, permisos denegados, SQL parametrizado, exportación, operaciones no-op y errores de motor/IndexedDB/API. Los permisos nativos requieren además comprobación en Chrome/Edge.
 

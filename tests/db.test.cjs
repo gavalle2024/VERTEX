@@ -10,6 +10,7 @@ let SQL;
 const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'db.js'), 'utf8');
 const migraciones = fs.readFileSync(path.join(__dirname, '..', 'js', 'migraciones.js'), 'utf8');
 const trabajoSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'trabajo.js'), 'utf8');
+const sqlJsDir = path.join(__dirname, 'vendor', 'sql.js', '1.10.2');
 const proyecto = {
   id: 'p1', nombre: 'Prueba', responsable: 'Responsable', division: 'URSA',
   inicio: '2026-10-23', meta: '', fin: '', estado: 'En curso', avance: 25,
@@ -18,15 +19,14 @@ const proyecto = {
 };
 
 before(async () => {
-  const cdn = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2';
-  const responses = await Promise.all(['sql-wasm.js', 'sql-wasm.wasm'].map(file => fetch(`${cdn}/${file}`)));
-  for (const response of responses) assert.equal(response.ok, true, 'sql.js debe estar disponible');
+  const sqlJsSource = fs.readFileSync(path.join(sqlJsDir, 'sql-wasm.js'), 'utf8');
+  const wasmBinary = new Uint8Array(fs.readFileSync(path.join(sqlJsDir, 'sql-wasm.wasm')));
   const context = vm.createContext({
     console, WebAssembly, TextDecoder, TextEncoder, setTimeout, clearTimeout,
     crypto: require('node:crypto').webcrypto
   });
-  vm.runInContext(await responses[0].text(), context);
-  SQL = await context.initSqlJs({ wasmBinary: new Uint8Array(await responses[1].arrayBuffer()) });
+  vm.runInContext(sqlJsSource, context);
+  SQL = await context.initSqlJs({ wasmBinary });
 });
 
 function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
@@ -302,24 +302,17 @@ test('informa motor ausente, navegador incompatible e IndexedDB bloqueado', asyn
   await assert.rejects(app.db.configurarCarpeta(), /Chrome o Edge/);
 });
 
-test('abre una copia de la base inicial del proyecto sin modificar el archivo original', async () => {
-  const original = fs.readFileSync(path.join(__dirname, '..', 'db', 'vertex.db'));
-  const file = archivo('vertex.db', new Uint8Array(original));
+test('abre una base SQLite sintética vigente sin volver a escribirla', async () => {
+  const creadora = await entornoNuevo();
+  const original = creadora.window.seleccion.file.datos.slice();
+  const file = archivo('vertex.db', original.slice());
   const app = entorno(file);
   await app.db.init();
-  if (app.db.estado.requiereMigracion) {
-    assert.equal(app.db.tieneArchivo, false);
-    assert.equal(file.escrituras, 0);
-    assert.deepEqual(Buffer.from(file.datos), original);
-    assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'db', 'vertex.db')), original);
-    return;
-  }
+  assert.equal(app.db.estado.requiereMigracion, false);
   assert.equal(app.db.tieneArchivo, true);
   assert.ok(Array.isArray(app.db.getProyectos()));
-  assert.equal(file.escrituras, original.length ? 0 : 1);
-  if (original.length) assert.deepEqual(Buffer.from(file.datos), original);
-  else assert.equal(Buffer.from(file.datos.slice(0, 16)).toString(), 'SQLite format 3\0');
-  assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'db', 'vertex.db')), original);
+  assert.equal(file.escrituras, 0);
+  assert.deepEqual(file.datos, original);
 });
 
 test('cambiar a una base existente no mezcla datos ni modifica la base anterior', async () => {

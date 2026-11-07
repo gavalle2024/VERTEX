@@ -109,7 +109,7 @@ La app está diseñada para **una instancia escritora por base**. No implementa 
 
 ## Requisitos y límites
 
-El motor y su WASM se descargan desde cdnjs; se necesita conexión para cargarlos. Si no están disponibles, se bloquea el uso y se informa el error. Los datos de proyectos no se envían a un servidor.
+En la aplicación de navegador, sql.js 1.10.2 y su WASM se cargan desde cdnjs; si no están disponibles, se bloquea el uso y se informa el error. Los datos de proyectos no se envían a un servidor. Las pruebas Node usan una copia local de la misma versión y no acceden a la red.
 
 No incluye autenticación, roles, vista de historial de cambios, importación Excel/CSV, sincronización multiusuario ni alertas automáticas por vencimiento. La infraestructura relacional registra actividad de sus operaciones, pero su interfaz y la integración de eventos del formulario histórico de proyectos corresponden a fases posteriores.
 
@@ -128,12 +128,13 @@ No incluye autenticación, roles, vista de historial de cambios, importación Ex
 | [js/app.js](js/app.js) | Inicialización, conexión y utilidades compartidas |
 | [db/vertex.db](db/vertex.db) | Base inicial; puede elegirse otra carpeta |
 | [tests/db.test.cjs](tests/db.test.cjs) | Regresión de persistencia |
+| [tests/vendor/sql.js/1.10.2/](tests/vendor/sql.js/1.10.2/) | `sql-wasm.js`, WASM y licencia de sql.js 1.10.2 para Node |
 | [tests/tableros.browser.js](tests/tableros.browser.js) | Comprobaciones DOM con base sintética y verificación de reapertura |
 | [docs/](docs/) | Arquitectura y cambios |
 
 ## Validación
 
-Con Node.js 22 o superior e internet, sin instalar paquetes:
+Con Node.js 22 o superior, sin instalar paquetes ni necesitar Internet para esta suite:
 
 ```powershell
 node --test tests\db.test.cjs
@@ -148,7 +149,9 @@ node --check js\actividad.js
 node --check js\dashboard.js
 ```
 
-Las pruebas descargan la misma versión de sql.js usada por la app, ejecutan SQLite real y simulan los handles y permisos de archivos sin tocar la base del proyecto.
+La copia de sql.js está incluida en `tests/vendor/sql.js/1.10.2/`. `tests/db.test.cjs` carga desde allí el JavaScript y WebAssembly, ejecuta SQLite real y simula archivos, handles, permisos e IndexedDB. Todas las bases de la suite son sintéticas; no se abre `db/vertex.db`. Para preparar el entorno basta conservar esos archivos al obtener el proyecto; no hay `npm install` ni descarga automática durante las pruebas. Si se renuevan los artefactos, usar el paquete oficial `sql.js` en la versión exacta declarada por la aplicación y actualizar conjuntamente la copia local y esta documentación.
+
+Para comprobar que el test Node no referencia un CDN ni `fetch`, ejecutar `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs`; no debe devolver coincidencias. Esta comprobación aplica a Node: la aplicación web mantiene su carga de sql.js desde cdnjs y, por lo tanto, su ejecución y las pruebas browser que cargan la app conservan ese requisito de red.
 
 La suite Node actual cubre **38 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
 

@@ -4,6 +4,15 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ---
 
+## [Sin publicar] — 2026-11-07
+
+### Entorno de pruebas Node reproducible sin CDN
+- `tests/db.test.cjs` inicializa sql.js 1.10.2 desde `tests/vendor/sql.js/1.10.2/` (`sql-wasm.js` y `sql-wasm.wasm`); coincide con la versión de producción y no descarga archivos durante la ejecución.
+- Se incorpora la distribución oficial mínima y su licencia, sin agregar dependencias npm instaladas ni cambiar la carga CDN de la aplicación.
+- La prueba de apertura de base vigente usa una imagen SQLite sintética y ya no lee `db/vertex.db`; el resto de la suite continúa usando archivos simulados y bases sintéticas.
+- Node.js 22+: `node --test tests\\db.test.cjs`. Verificar ausencia de llamadas/referencias de red con `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs` (sin resultados esperados).
+- Verificación de implementación y ejecución con `fetch` bloqueado: **38 pruebas aprobadas, 0 fallidas**.
+
 ## [Sin publicar] — 2026-10-24
 
 ### Auditoría de robustez, actividad y calendario (fase 8) — 2026-10-25
