@@ -6,15 +6,26 @@ node_modules/
 .env.*
 !.env.example
 
-# Bases de datos locales
-db/*.db
-db/*.sqlite
-db/*.sqlite3
+# Bases de datos SQLite
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# Respaldos de bases de datos
+*.bak
+*.backup
+*.dump
 
 # Archivos temporales
 *.log
 .DS_Store
 Thumbs.db
+*.tmp
+*.temp
 
 # Entornos virtuales
 .venv/
@@ -24,3 +35,11 @@ __pycache__/
 
 # Archivos generados
 coverage/
+dist/
+build/
+
+# Documentos locales o de prueba
+*.xlsx
+*.xls
+~$*.docx
+~$*.xlsx
