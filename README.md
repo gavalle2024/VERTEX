@@ -113,6 +113,18 @@ La app está diseñada para **una instancia escritora por base**. No implementa 
 
 La comparación previa no es un bloqueo entre procesos: otro escritor puede modificar el archivo después de esa lectura. Si `close()` falla tras haber escrito, o hay caída del sistema, la app conserva su estado confirmado pero no puede garantizar qué bytes quedaron en disco. No restaura automáticamente ni sobrescribe para "reparar": conservar los archivos, verificar su contenido y seleccionar explícitamente la base correcta. Una creación fallida puede dejar un archivo vacío; no se elimina automáticamente.
 
+## Copias de seguridad: B1/B2
+
+La API `PSA.DB.crearBackup()` permite guardar una copia independiente del estado SQLite confirmado; `PSA.DB.crearBackup({ enCarpeta: true })` permite elegir una carpeta. El nombre sugerido es `VERTEX_backup_AAAA-MM-DD_HH-mm-ss.db`, con fecha/hora local. No cambia la conexión ni incluye datos de formularios pendientes. Se rechazan el archivo activo y destinos que ya contienen datos; en modo carpeta también se rechaza un nombre existente.
+
+El respaldo solo se confirma después de escritura, cierre, relectura, comparación byte a byte y validación integral. `PSA.DB.validarBackup(handle)` valida un archivo mediante una instancia SQLite independiente: cabecera, páginas completas, `integrity_check`, FK, versión actual de esquema (3), tablas, índices, columnas y consultas esenciales. Devuelve `valido`, `codigo`, `mensaje`, tamaño y versión; un error de lectura rechaza la Promise. No modifica el archivo ni ejecuta migraciones.
+
+La restauración B3 se prepara con `PSA.DB.prepararRestauracion(handle)` y se aplica con `PSA.DB.restaurarBackup()`. El segundo método solicita una carpeta y crea un archivo nuevo `vertex_restaurada_…db`; nunca sobrescribe el backup ni la base activa, ni cambia la conexión actual. El destino se relee, compara byte a byte y valida de nuevo. `PSA.DB.cancelarRestauracion()` descarta la preparación sin escribir. La interfaz B4 se encuentra en la pestaña **Administración de datos** e incluye creación/validación de copias, restauración hacia archivo nuevo e historial local independiente de hasta 100 operaciones.
+
+Los eventos `psa:backup-state` informan inicio, éxito, cancelación o fallo, con nombre/ubicación/tamaño en el resultado exitoso. La ocupación es transitoria y bloquea guardados, conexiones y exportaciones concurrentes. Si falla la relectura o validación, el archivo queda sin confirmar: no se elimina automáticamente ni se intenta reparar.
+
+**Alcance:** B1 y B2 están implementados como API; la restauración hacia archivo nuevo (B3), historial independiente y sección Administración de datos (B4) esperan revisión. No existe restauración automática ni se sobrescribe la base activa. Los selectores y permisos nativos siguen pendientes de pruebas manuales; los tests usan SQLite sintético, archivos virtuales y un caso con temporales reales de Node.
+
 ## Requisitos y límites
 
 En la aplicación de navegador, sql.js 1.10.2 y su WASM se cargan desde cdnjs; si no están disponibles, se bloquea el uso y se informa el error. Los datos de proyectos no se envían a un servidor. Las pruebas Node usan una copia local de la misma versión y no acceden a la red.
@@ -171,7 +183,9 @@ La copia de sql.js está incluida en `tests/vendor/sql.js/1.10.2/`. `tests/db.te
 
 Para comprobar que el test Node no referencia un CDN ni `fetch`, ejecutar `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs`; no debe devolver coincidencias. Esta comprobación aplica a Node: la aplicación web mantiene su carga de sql.js desde cdnjs y, por lo tanto, su ejecución y las pruebas browser que cargan la app conservan ese requisito de red.
 
-La suite Node actual cubre **64 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+La suite Node actual cubre **101 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+
+`probarBackupsB1B2()` agrega 14 comprobaciones browser de respaldo, validación, conservación de formulario/conexión, cancelación, fallos y recuperación. La matriz B1/B2 está en [docs/migraciones.md](docs/migraciones.md).
 
 `probarPersistenciaA3()` agrega 27 comprobaciones de fallos y recuperación de UI. Ejecutarlo solo en una página aislada con IndexedDB interceptado antes del arranque. La matriz Node A3-01 a A3-25 y sus resultados están en [docs/migraciones.md](docs/migraciones.md). Las API de archivos son simuladas; no equivalen a permisos o bloqueos reales del sistema operativo.
 
@@ -182,3 +196,28 @@ La suite Node actual cubre **64 pruebas**. Las pruebas de navegador `probarInter
 - [Instrucciones para agentes](AGENTS.md)
 - [Evolución visual: matriz de brechas, diseño aprobado y fases](docs/evolucion-visual.md)
 - [Persistencia relacional, respaldo, migraciones y recuperación](docs/migraciones.md)
+
+
+### Selección de respaldos
+
+Los selectores para crear, validar y seleccionar un respaldo comparten el identificador `vertex_backup` de File System Access API. Esto permite que Chromium/Edge reutilice la última carpeta elegida para las operaciones de backup. Si el archivo no aparece, verifique que el selector esté mostrando archivos `.db` y navegue manualmente hasta la carpeta donde guardó `VERTEX_backup_*.db`.
+
+
+### Selección de respaldos para validación y restauración
+
+La interfaz utiliza el selector HTML nativo (`input[type=file]`) para recibir un objeto `File` y leerlo mediante `arrayBuffer()`. La validación SQLite se realiza por contenido, no por extensión. Este flujo evita depender de que `showOpenFilePicker()` entregue un `FileSystemFileHandle` en todos los entornos Chromium. La restauración sigue requiriendo `showDirectoryPicker()` para crear un archivo nuevo; no se otorgan ni simulan permisos persistentes de escritura sobre el archivo de origen.
+
+
+### Tarjetas Kanban compactas
+
+La vista Kanban prioriza título, prioridad, responsables y vencimiento. La información secundaria se encuentra en «Más información» y las acciones se agrupan en el menú `⋮` de cada tarjeta. El arrastre continúa limitado al control específico y la selección múltiple conserva sus controles actuales.
+
+
+### Etapas Kanban compactas
+
+Las etapas muestran el nombre, el conteo de tarjetas visibles y su categoría en una cabecera reducida. Las acciones de edición, ordenamiento, selección múltiple y archivado/reactivación se agrupan en el menú `⋮`. El botón `+ Crear tarjeta` permanece visible al pie de cada etapa y las columnas vacías muestran un mensaje breve. El panel de acciones se despliega en el flujo de la cabecera para evitar que quede recortado por el contenedor horizontal del tablero.
+
+
+## Tema claro y oscuro
+
+La interfaz permite alternar entre modo claro y oscuro desde el control de la cabecera. La preferencia se guarda en `localStorage` bajo la clave `vertex-theme` y no modifica SQLite. Si no existe una preferencia válida, la aplicación inicia en modo claro. La etiqueta PSA · AVSEC fue retirada de la cabecera activa.

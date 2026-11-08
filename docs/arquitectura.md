@@ -57,6 +57,8 @@ Se carga primero [migraciones.js](../js/migraciones.js) (`PSA.Esquema`) y despu�
 | `saveProyecto(p, esNuevo)` | Promise que se resuelve tras persistir al archivo |
 | `deleteProyecto(id)` | Promise que se resuelve tras persistir al archivo |
 | `exportarDB()` | Binario SQLite completo del estado confirmado o `null` |
+| `crearBackup({enCarpeta})` | Selección y escritura de copia independiente, relectura e integridad verificadas; no modifica la conexión |
+| `validarBackup(handle)` | Diagnóstico de una copia en una instancia independiente; sin escritura ni migración |
 | `estado` | `{useSQLite, tieneArchivo, esperaPermiso, ocupado, ubicacion, error}` |
 | `migrarConexion()` | Confirma respaldo y migración pendiente; Promise con `{ok, respaldo}` |
 | `cancelarMigracion()` | Descarta la solicitud sin escribir ni cambiar la base previa |
@@ -66,6 +68,14 @@ Se carga primero [migraciones.js](../js/migraciones.js) (`PSA.Esquema`) y despu�
 `estado` agrega `requiereMigracion` y `destinoMigracion`. Las conexiones pueden devolver `{ok: false, requiereMigracion: true}`: la UI muestra la confirmación, sin tratarlo como éxito.
 
 Los getters `useSQLite`, `tieneArchivo`, `esperaPermiso`, `ocupado` y `hasFSA` permiten consultar el estado sin exponer handles.
+
+B1/B2 reutilizan la exclusión global de operaciones y la escritura verificada de respaldos de migración. `exportarDB()` también rechaza llamadas mientras hay una operación ocupada. La copia parte del SQLite confirmado en memoria, no de una lectura del archivo activo; no incluye formularios pendientes ni cambia el handle. El destino debe ser independiente, identificable con `isSameEntry` y vacío. En carpeta se crea un nombre nuevo tras comprobar que no existe. Seleccionar/cancelar no escribe datos del respaldo; una creación fallida puede dejar un archivo vacío o parcial, que no se borra automáticamente.
+
+La validación usa una instancia SQL propia con `integrity_check`, `foreign_key_check` y `PSA.Esquema.validar`, más consultas de conteo sobre proyectos/tableros/tarjetas/actividad. Cabecera inválida, archivo vacío, páginas incompletas, corrupción y esquema incompatible se diagnostican sin llamar a `preparar` ni `migrar`. Solo el esquema actual 3 se considera compatible en B2; bases antiguas requieren un proceso explícito separado. `_escribirVerificado()` comparte write/close/relectura/igualdad con respaldos previos a migraciones; B1 agrega validación integral antes y después de escribir.
+
+`psa:backup-state` expone `en_curso`, `exitosa`, `cancelada` y `fallida`. El resultado exitoso contiene nombre, ubicación mostrable (no ruta absoluta), tamaño y versión de esquema. No constituye historial persistido ni cambia entidades. Restauración (B3), historial e interfaz (B4) no se implementan en esta entrega.
+
+No se garantiza protección contra un escritor externo que actúe entre comprobación y escritura, ni ante un cierre de resultado ambiguo o daño físico. Un archivo no confirmado no se considera recuperable por el mero hecho de existir; debe validarse nuevamente. No hay restauración/reparación automática ni eliminación de destinos fallidos.
 
 Las operaciones fallidas rechazan su Promise; la UI debe capturar y notificar el error. La cancelación voluntaria del selector no se trata como error.
 
@@ -298,3 +308,18 @@ Las pruebas DOM en Chromium aprobaron: interfaz de fase 3, movimientos, arrastre
 ## Evolución propuesta
 
 El [análisis de evolución visual](evolucion-visual.md) conserva la matriz histórica de brechas sobre la línea base (`user_version=0`) y registra el estado actual: fases 2 a 8 implementadas, con esquema vigente 3. Mis tareas y el historial visual ampliado de proyectos permanecen pendientes. Ver [migraciones y límites de esta entrega](migraciones.md).
+
+
+### Selección de respaldos para validación y restauración
+
+La interfaz utiliza el selector HTML nativo (`input[type=file]`) para recibir un objeto `File` y leerlo mediante `arrayBuffer()`. La validación SQLite se realiza por contenido, no por extensión. Este flujo evita depender de que `showOpenFilePicker()` entregue un `FileSystemFileHandle` en todos los entornos Chromium. La restauración sigue requiriendo `showDirectoryPicker()` para crear un archivo nuevo; no se otorgan ni simulan permisos persistentes de escritura sobre el archivo de origen.
+
+
+### Presentación compacta de tarjetas Kanban
+
+Las tarjetas muestran permanentemente el título, prioridad, responsables y vencimiento. La fecha de inicio, etiquetas y estados secundarios se agrupan en un panel nativo `details`. Las acciones de historial, edición, orden, movimiento y archivado se agrupan en un menú contextual `details`, con cierre al hacer clic fuera o pulsar Escape. El selector de destino específico se despliega bajo demanda. El control `.work-drag-handle` sigue siendo el único origen de drag and drop; la casilla de selección permanece independiente.
+
+
+### Presentación compacta de etapas
+
+`js/tableros.js` renderiza cada etapa con una cabecera que contiene nombre, conteo visible y categoría. Las operaciones de edición, reordenamiento, selección múltiple y archivado se mantienen en el menú contextual `.work-list-menu`; sus botones reutilizan las acciones de negocio existentes. El menú se despliega dentro del flujo del encabezado, evitando depender de capas posicionadas fuera del contenedor Kanban con desplazamiento horizontal. La creación de tarjetas queda como acción persistente al pie de la columna.

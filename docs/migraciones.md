@@ -76,6 +76,52 @@ Una falla de migración revierte su transacción en memoria. Una falla de respal
 
 No existe una degradación automática del esquema ni se destruyen tablas para volver atrás. El respaldo contiene únicamente los datos previos a la migración: no puede recuperar cambios hechos después.
 
+## Respaldos B1/B2
+
+**Alcance aprobado:** creación y validación de copias independientes. B3 (restauración) y B4 (historial e interfaz) esperan revisión; no se cambia de conexión al crear o validar una copia.
+
+- `await PSA.DB.crearBackup()`: elige un archivo de destino vacío, distinto del activo y cuya identidad pueda verificarse. El selector sugiere `VERTEX_backup_AAAA-MM-DD_HH-mm-ss.db` con fecha/hora local.
+- `await PSA.DB.crearBackup({ enCarpeta: true })`: elige una carpeta y crea el nombre solo tras comprobar ausencia. Un nombre existente se rechaza, incluso si el archivo está vacío.
+- `await PSA.DB.validarBackup(handle)`: lee un FileSystemFileHandle y devuelve un diagnóstico sin modificar el archivo. Errores de lectura rechazan la Promise; archivos inválidos devuelven `valido: false` y un código.
+
+La copia contiene el estado SQLite confirmado en memoria, excluye ediciones pendientes y no lee el archivo activo para crearla. Se serializa con las demás operaciones. B1 confirma únicamente tras write, close, relectura, igualdad byte a byte y validación integral del destino. Informa estados con `psa:backup-state`; no registra historial ni datos de entidades.
+
+B2 comprueba cabecera SQLite, encabezado/páginas completas, apertura en una instancia independiente, `PRAGMA integrity_check = ok`, ausencia de filas en `PRAGMA foreign_key_check`, esquema actual, tablas/columnas/índices/FK esperados mediante el validador existente y consultas esenciales. Códigos: `archivo_vacio`, `archivo_invalido`, `archivo_incompleto`, `integridad`, `esquema_incompatible` y `valido`. No ejecuta migraciones. Los esquemas anteriores o futuros no se ofrecen como recuperables por esta API.
+
+### Matriz B1
+
+| Escenario | Resultado final |
+|---|---|
+| Copia del estado confirmado | Igualdad binaria, validación, origen/handle intactos |
+| Carpeta elegida y colisión de nombre | Creación independiente; existente no sobrescrito |
+| Archivo activo o alias | Rechazo antes de escribir |
+| Destino con contenido o identidad no verificable | Rechazo sin escribir |
+| Cancelación de selector de archivo/carpeta | Sin escritura ni éxito comunicado |
+| Fallos createWritable/write/close | Respaldo no confirmado; reintento a nuevo destino |
+| Fallos de relectura o bytes distintos | Respaldo no confirmado |
+| Validación integral posterior fallida | Respaldo no confirmado, aunque write/close terminaran |
+| Cierre pendiente y operaciones simultáneas | Sin exportación/guardado/copia/validación concurrente |
+| Aborto al crear destino | Fallo, no cancelación de selector |
+| Archivo temporal físico con SQLite sintético | Copia escrita, validada y reabierta desde bytes del disco |
+
+### Matriz B2
+
+| Escenario | Resultado final |
+|---|---|
+| Copia íntegra con entidades y actividad | Validación y consultas esenciales sin modificar origen |
+| Archivo vacío / no SQLite | Diagnóstico específico |
+| Encabezado o página truncados | Archivo incompleto |
+| Corrupción / FK huérfana | Error de integridad |
+| Esquema antiguo/futuro | Incompatible; sin migrar |
+| Tabla o índice ausente | Esquema incompatible |
+| Error de lectura seguido de reintento | Error propagado y recuperación |
+| Validación/guardado simultáneos | Operación concurrente rechazada |
+| Sin conexión activa / motor no inicializado | Valida con motor disponible; sin motor rechaza |
+
+Resultados B1/B2: **17 pruebas B1 y 14 B2 aprobadas**, todas con SQLite sintético. El caso físico usa temporales de Node y un adaptador de handle simulado, no el selector/Writable nativo del navegador. Browser: `probarBackupsB1B2()` aprobó **14 comprobaciones** con archivos/selectores simulados e IndexedDB interceptado antes del arranque, conservando el formulario pendiente, origen y conexión; sin violaciones CSP ni excepciones no controladas. La regresión funcional también fue ejecutada.
+
+No se considera confirmado un destino con fallo de escritura, cierre, relectura o validación. Puede quedar un archivo vacío/parcial; no se elimina ni se repara automáticamente. No se garantiza recuperación ante un close ambiguo, daño físico o escritores externos entre comprobación y escritura. Selectores, permisos y bloqueos reales del sistema operativo quedan pendientes de comprobación manual. La base habitual y sus auxiliares no se leen ni modifican en pruebas.
+
 ## API relacional disponible
 
 ### Transacciones confirmadas
@@ -186,3 +232,31 @@ Los archivos existentes de cero bytes se rechazan; solo se crea una base tras co
 Si se revoca acceso a la conexión activa, reautorizar no carga otra DB ni limpia formularios: después se reintenta. No hay reparación automática, eliminación ni restauración silenciosa. Una carrera con otro proceso entre lectura y escritura, un close de resultado ambiguo o daño físico siguen fuera de las garantías; la app conserva su estado confirmado e informa error, pero no puede asegurar rollback del archivo. Mantener un solo escritor y respaldos. Quedan pendientes pruebas manuales de permisos/selectores nativos y bloqueos reales del sistema operativo.
 
 Los selectores y permisos del sistema operativo no se aprueban automáticamente: requieren validación manual del usuario. En navegador se puede comprobar el flujo con handles simulados sin escribir datos reales.
+
+## Restauración segura B3
+
+La restauración se prepara mediante `PSA.DB.prepararRestauracion(handle)`. Esta operación lee el archivo seleccionado, ejecuta la validación integral B2 en una instancia SQLite independiente y conserva una copia de los bytes validados en memoria. Si el archivo no es válido, no queda una restauración preparada.
+
+La aplicación de la restauración se realiza con `PSA.DB.restaurarBackup()`. En el gesto explícito del usuario se abre el selector de carpeta y se crea un archivo nuevo con nombre `vertex_restaurada_AAAA-MM-DD_HH-mm-ss_<sufijo>.db`. No se utiliza un selector de archivo que pueda elegir y sobrescribir un archivo existente. Se comprueba que el nuevo handle sea distinto del archivo activo y del respaldo fuente; luego se exige destino vacío, escritura, cierre, relectura, igualdad binaria y validación B2 del destino.
+
+La restauración no cambia la conexión activa, no descarta formularios, no ejecuta migraciones y no modifica el respaldo fuente. Tras el éxito, el archivo restaurado queda disponible para abrirse posteriormente mediante el flujo habitual de conexión. `PSA.DB.cancelarRestauracion()` descarta una preparación sin escribir archivos. Cancelar el selector conserva la preparación para permitir reintentar; ante fallo de escritura puede quedar un archivo residual sin confirmar, que no se elimina ni repara automáticamente.
+
+API B3:
+
+- `PSA.DB.prepararRestauracion(handle)`: valida y prepara una copia. Devuelve `preparada: true` y metadatos, o `preparada: false` con el informe de validación.
+- `PSA.DB.restaurarBackup()`: solicita una carpeta y escribe un archivo nuevo; devuelve `ok`, nombre, ubicación, tamaño, versión y confirmación de que la conexión activa se conservó.
+- `PSA.DB.cancelarRestauracion()`: descarta la preparación pendiente sin escribir.
+- Evento `psa:restore-state`: estados `preparada`, `invalida`, `cancelada`, `fallida` y `exitosa`.
+
+Pruebas B3 en `tests/db.test.cjs`: preparación válida y restauración a archivo nuevo; rechazo de respaldo inválido; cancelación del selector sin creación de archivos; y fallo de escritura sin alterar conexión ni datos activos. Son pruebas Node con SQLite real y handles sintéticos. La selección de carpeta, permisos nativos y escritura mediante File System Access API real quedan pendientes de prueba manual en Chromium/Edge. La interfaz de usuario y el historial de operaciones corresponden a B4 y todavía no están implementados.
+
+
+## Historial e interfaz B4
+
+La sección **Administración de datos** permite crear copias, validar archivos seleccionados, preparar una restauración, crear el archivo restaurado y consultar el historial. Los selectores se invocan directamente desde los eventos de usuario y la restauración prefiere el selector de archivo de destino para elegir nombre y ubicación en una sola ventana; si no está disponible, utiliza el selector de carpeta. La confirmación informa el destino y que la base activa permanecerá intacta.
+
+El historial usa una base IndexedDB separada (`psa_vertex_backup_history_v1`) y un almacén `operaciones`, independiente del almacén que recuerda el handle de `vertex.db`. Conserva como máximo 100 registros con fecha, tipo, nombre de archivo, tamaño, resultado, mensaje, versión de esquema y versión declarada de la aplicación. No guarda contenido SQLite ni datos de proyectos. Los errores del historial se registran en consola y no invalidan una copia o restauración que ya fue verificada.
+
+La interfaz utiliza `textContent` para mostrar metadatos y no introduce HTML dinámico, estilos inline ni handlers inline. Los eventos `psa:backup-state` y `psa:restore-state` actualizan la vista y el historial.
+
+La interfaz y el historial se probaron mediante verificación estática y suite Node de APIs. La interacción real de los selectores, permisos y persistencia IndexedDB en Chromium/Edge debe confirmarse manualmente antes de considerar B4 cerrado.

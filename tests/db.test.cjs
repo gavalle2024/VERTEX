@@ -4,6 +4,7 @@ const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const vm = require('node:vm');
 
 let SQL;
@@ -33,6 +34,7 @@ function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
   return {
     kind: 'file', name: nombre, datos: inicial, fallo: false, escrituras: 0, permiso: 'granted',
     writableCreados: 0, abortos: 0,
+    async isSameEntry(otro) { return this === otro; },
     async queryPermission() { return this.permiso; },
     async requestPermission() { return this.permiso; },
     async getFile() {
@@ -65,6 +67,26 @@ function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
       };
     }
   };
+}
+
+function archivoDestinoNuevo(nombre) {
+  const destino = archivo(nombre);
+  let existe = false;
+  const crearWritable = destino.createWritable.bind(destino);
+  destino.getFile = async () => {
+    if (!existe) { const error = new Error('No existe'); error.name = 'NotFoundError'; throw error; }
+    const copia = destino.datos.slice();
+    return { arrayBuffer: async () => copia.buffer };
+  };
+  destino.createWritable = async () => {
+    const writable = await crearWritable();
+    return {
+      write: data => writable.write(data),
+      async close() { await writable.close(); existe = true; },
+      abort: error => writable.abort(error)
+    };
+  };
+  return destino;
 }
 
 function carpeta(file = null) {
@@ -125,7 +147,7 @@ function entorno(guardado, opciones = {}) {
                 return {
                   get(key) {
                     const result = { result: store.get(key) };
-                    queueMicrotask(() => tx.oncomplete());
+                    queueMicrotask(() => { if (result.onsuccess) result.onsuccess(); tx.oncomplete(); });
                     return result;
                   },
                   put(value, key) {
@@ -447,6 +469,470 @@ test('A3-25: una marca nueva recordada no permite sobrescribir un archivo existe
   assert.match(estado.error, /existente está vacío/);
   assert.equal(estado.tieneArchivo, false);
   assert.equal(file.escrituras, 0);
+});
+
+test('B2: valida copia íntegra en una instancia independiente sin modificar origen ni conexión', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const tablero = await app.trabajo.guardarTablero({ proyecto_id: proyecto.id, nombre: 'Validación sintética' });
+  const lista = app.trabajo.getListas(tablero)[0].id;
+  await app.trabajo.guardarTarjeta({ lista_id: lista, titulo: 'Tarjeta sintética' });
+  const original = app.db.exportarDB();
+  const file = archivo('copia-sintetica.db', original.slice());
+  const conexion = app.store.get('vertex_db');
+  const resultado = await app.db.validarBackup(file);
+  assert.equal(resultado.valido, true);
+  assert.equal(resultado.versionEsquema, 3);
+  assert.equal(resultado.consultas.proyectos, 1);
+  assert.equal(resultado.consultas.tableros, 1);
+  assert.equal(resultado.consultas.tarjetas, 1);
+  assert.ok(resultado.consultas.actividad > 0);
+  assert.equal(file.escrituras, 0);
+  assert.deepEqual(file.datos, original);
+  assert.ok(app.store.get('vertex_db') === conexion);
+  assert.deepEqual(app.db.exportarDB(), original);
+});
+
+for (const tipo of ['vacío', 'no SQLite', 'truncado', 'página truncada', 'corrupto', 'versión antigua', 'versión futura', 'tabla ausente', 'índice ausente', 'FK inválida']) {
+  test('B2: rechaza ' + tipo + ' sin modificar el archivo ni migrar', async () => {
+    const app = await entornoNuevo();
+    let datos = app.db.exportarDB();
+    let codigo;
+    if (tipo === 'vacío') { datos = new Uint8Array(); codigo = 'archivo_vacio'; }
+    else if (tipo === 'no SQLite') { datos = new Uint8Array([1, 2, 3]); codigo = 'archivo_invalido'; }
+    else if (tipo === 'truncado') { datos = datos.slice(0, 80); codigo = 'archivo_incompleto'; }
+    else if (tipo === 'página truncada') { datos = datos.slice(0, datos.length - 1); codigo = 'archivo_incompleto'; }
+    else if (tipo === 'corrupto') { datos = datos.slice(); datos[100] = 255; codigo = 'integridad'; }
+    else if (tipo === 'versión antigua') { datos = baseLegacy(); codigo = 'esquema_incompatible'; }
+    else {
+      const sintesis = new SQL.Database(datos);
+      if (tipo === 'versión futura') sintesis.run('PRAGMA user_version=99');
+      if (tipo === 'tabla ausente') sintesis.run('DROP TABLE actividad');
+      if (tipo === 'índice ausente') sintesis.run('DROP INDEX idx_tarjetas_vencimiento');
+      if (tipo === 'FK inválida') {
+        sintesis.run('PRAGMA foreign_keys=OFF');
+        sintesis.run("INSERT INTO tableros (id,proyecto_id,nombre) VALUES ('huérfano','inexistente','Sintético')");
+      }
+      datos = sintesis.export();
+      sintesis.close();
+      codigo = tipo === 'FK inválida' ? 'integridad' : 'esquema_incompatible';
+    }
+    const file = archivo('copia-prueba.db', datos.slice());
+    app.esquema.migrar = () => { throw new Error('No debe migrar una validación'); };
+    const resultado = await app.db.validarBackup(file);
+    assert.equal(resultado.valido, false);
+    assert.equal(resultado.codigo, codigo);
+    assert.equal(file.escrituras, 0);
+    assert.deepEqual(file.datos, datos);
+    assert.equal(app.db.tieneArchivo, true);
+    assert.equal(app.db.ocupado, false);
+  });
+}
+
+test('B2: error de lectura se propaga y permite validar de nuevo', async () => {
+  const app = await entornoNuevo();
+  const file = archivo('copia-prueba.db', app.db.exportarDB());
+  file.errorLectura = errorArchivoPrueba('NotReadableError');
+  await assert.rejects(app.db.validarBackup(file), /Lectura SQLite/);
+  assert.equal(app.db.ocupado, false);
+  file.errorLectura = null;
+  assert.equal((await app.db.validarBackup(file)).valido, true);
+});
+
+test('B4: historial independiente registra validación y restauración sin datos funcionales', async () => {
+  const app = await entornoNuevo();
+  const backup = archivo('historial-sintetico.db', app.db.exportarDB());
+  const validacion = await app.db.validarBackup(backup);
+  assert.equal(validacion.valido, true);
+  assert.equal((await app.db.prepararRestauracion(backup)).preparada, true);
+  const historial = await app.db.listarHistorialBackups();
+  assert.ok(historial.length >= 2);
+  assert.ok(historial.some(item => item.tipo === 'validacion' && item.resultado === 'valida'));
+  assert.ok(historial.some(item => item.tipo === 'restauracion' && item.resultado === 'preparada'));
+  for (const item of historial) {
+    assert.ok(item.fecha);
+    assert.ok(item.versionApp);
+    assert.equal(Object.hasOwn(item, 'datos'), false);
+    assert.equal(Object.hasOwn(item, 'contenido'), false);
+  }
+  app.db.cancelarRestauracion();
+});
+
+test('B3: acepta un File del selector HTML sin FileSystemFileHandle y restaura a un destino nuevo', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const bytes = app.db.exportarDB();
+  const fileInput = {
+    name: 'respaldo-seleccion-html.db',
+    size: bytes.length,
+    type: 'application/octet-stream',
+    async arrayBuffer() { return bytes.slice().buffer; }
+  };
+
+  const validacion = await app.db.validarBackup(fileInput);
+  assert.equal(validacion.valido, true);
+  const preparada = await app.db.prepararRestauracion(fileInput);
+  assert.equal(preparada.preparada, true);
+  assert.equal(preparada.nombre, fileInput.name);
+
+  const conexion = app.store.get('vertex_db');
+  const activo = app.window.seleccion.file;
+  const activoAntes = activo.datos.slice();
+  const carpetaDestino = carpeta();
+  app.window.seleccion = carpetaDestino;
+  const resultado = await app.db.restaurarBackup();
+
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.conexionActivaConservada, true);
+  assert.equal(app.store.get('vertex_db'), conexion);
+  assert.equal(Buffer.from(activo.datos).equals(Buffer.from(activoAntes)), true);
+  const destino = carpetaDestino.respaldos.get(resultado.nombre);
+  assert.ok(destino);
+  assert.equal(Buffer.from(destino.datos).equals(Buffer.from(bytes)), true);
+  assert.notEqual(destino.name, fileInput.name);
+  assert.equal(app.db.ocupado, false);
+});
+
+test('B2: valida File del selector HTML y rechaza contenido inválido con diagnóstico', async () => {
+  const app = await entornoNuevo();
+  const bytes = app.db.exportarDB();
+  const fileValido = { name: 'seleccion-html.db', async arrayBuffer() { return bytes.slice().buffer; } };
+  const fileInvalido = { name: 'seleccion-html-invalido.db', async arrayBuffer() { return new Uint8Array([1, 2, 3]).buffer; } };
+  assert.equal((await app.db.validarBackup(fileValido)).valido, true);
+  const invalido = await app.db.validarBackup(fileInvalido);
+  assert.equal(invalido.valido, false);
+  assert.equal(invalido.codigo, 'archivo_invalido');
+});
+
+test('B3: prepara un respaldo válido y lo restaura a un archivo nuevo sin cambiar la conexión activa', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const bytes = app.db.exportarDB();
+  const origen = archivo('respaldo-valido.db', bytes.slice());
+  const conexion = app.store.get('vertex_db');
+  const handleActivo = app.window.seleccion.file;
+  const activoAntes = handleActivo.datos.slice();
+  const preparada = await app.db.prepararRestauracion(origen);
+  assert.equal(preparada.preparada, true);
+  assert.equal(preparada.versionEsquema, 3);
+  const destinoFolder = carpeta();
+  app.window.seleccion = destinoFolder;
+  const resultado = await app.db.restaurarBackup();
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.conexionActivaConservada, true);
+  assert.equal(app.store.get('vertex_db'), conexion);
+  assert.deepEqual(handleActivo.datos, activoAntes);
+  assert.equal(Buffer.from(origen.datos).equals(Buffer.from(bytes)), true);
+  const destino = destinoFolder.respaldos.get(resultado.nombre);
+  assert.ok(destino);
+  assert.equal(destino.escrituras, 1);
+  assert.equal(Buffer.from(destino.datos).equals(Buffer.from(bytes)), true);
+  const restaurada = new SQL.Database(destino.datos);
+  assert.equal(restaurada.exec('SELECT nombre FROM proyectos')[0].values[0][0], 'Prueba');
+  restaurada.close();
+  assert.equal(app.db.ocupado, false);
+});
+
+test('B3: selector de archivo de destino crea un archivo nuevo y muestra confirmación antes de escribir', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const bytes = app.db.exportarDB();
+  const origen = { name: 'respaldo-file-picker.db', async arrayBuffer() { return bytes.slice().buffer; } };
+  assert.equal((await app.db.prepararRestauracion(origen)).preparada, true);
+  const destino = archivoDestinoNuevo('vertex_restaurada_prueba.db');
+  let opciones;
+  app.window.showSaveFilePicker = async valor => { opciones = valor; return destino; };
+  let confirmaciones = 0;
+  app.window.confirm = mensaje => { confirmaciones++; assert.match(mensaje, /vertex_restaurada_prueba.db/); return true; };
+  const resultado = await app.db.restaurarBackup();
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.nombre, destino.name);
+  assert.equal(confirmaciones, 1);
+  assert.equal(opciones.suggestedName.endsWith('.db'), true);
+  assert.equal(Buffer.from(destino.datos).equals(Buffer.from(bytes)), true);
+  assert.equal(app.db.ocupado, false);
+});
+
+test('B3: rechaza respaldo inválido y no permite iniciar restauración', async () => {
+  const app = await entornoNuevo();
+  const invalido = archivo('invalido.db', new Uint8Array([1, 2, 3]));
+  const resultado = await app.db.prepararRestauracion(invalido);
+  assert.equal(resultado.preparada, false);
+  assert.equal(resultado.validacion.valido, false);
+  await assert.rejects(app.db.restaurarBackup(), /Primero seleccione y valide/);
+  assert.equal(invalido.escrituras, 0);
+  assert.equal(app.db.ocupado, false);
+});
+
+test('B3: cancelar selector conserva respaldo preparado y no crea archivos', async () => {
+  const app = await entornoNuevo();
+  const origen = archivo('respaldo.db', app.db.exportarDB());
+  assert.equal((await app.db.prepararRestauracion(origen)).preparada, true);
+  const cancelado = new Error('Cancelado');
+  cancelado.name = 'AbortError';
+  app.window.errorSelector = cancelado;
+  const resultado = await app.db.restaurarBackup();
+  assert.equal(resultado.cancelado, true);
+  assert.equal(resultado.preparada, true);
+  assert.equal(app.db.ocupado, false);
+  assert.equal(app.db.cancelarRestauracion(), true);
+  assert.equal(app.db.cancelarRestauracion(), false);
+});
+
+test('B3: cancelar la confirmación no crea archivos ni descarta la copia preparada', async () => {
+  const app = await entornoNuevo();
+  const origen = archivo('respaldo.db', app.db.exportarDB());
+  assert.equal((await app.db.prepararRestauracion(origen)).preparada, true);
+  const destinoFolder = carpeta();
+  app.window.seleccion = destinoFolder;
+  app.window.confirmar = false;
+  const resultado = await app.db.restaurarBackup();
+  assert.equal(resultado.cancelado, true);
+  assert.equal(resultado.preparada, true);
+  assert.equal(destinoFolder.respaldos.size, 0);
+  assert.equal(app.db.ocupado, false);
+  assert.equal(app.db.cancelarRestauracion(), true);
+});
+
+test('B3: un error de escritura no altera la conexión activa y permite cancelar la preparación', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const origen = archivo('respaldo.db', app.db.exportarDB());
+  const conexion = app.store.get('vertex_db');
+  const handleActivo = app.window.seleccion.file;
+  const activa = handleActivo.datos.slice();
+  assert.equal((await app.db.prepararRestauracion(origen)).preparada, true);
+  const destinoFolder = carpeta();
+  destinoFolder.getFileHandle = async function (nombre, options) {
+    if (nombre === 'vertex.db') return this.file;
+    if (this.respaldos.has(nombre)) return this.respaldos.get(nombre);
+    if (options && options.create) {
+      const nuevo = archivo(nombre);
+      nuevo.fallo = true;
+      this.respaldos.set(nombre, nuevo);
+      return nuevo;
+    }
+    const error = new Error('No existe'); error.name = 'NotFoundError'; throw error;
+  };
+  app.window.seleccion = destinoFolder;
+  await assert.rejects(app.db.restaurarBackup(), /No se pudo completar la restauración/);
+  assert.equal(app.store.get('vertex_db'), conexion);
+  assert.deepEqual(handleActivo.datos, activa);
+  assert.equal(app.db.getProyectos().length, 1);
+  assert.equal(app.db.cancelarRestauracion(), true);
+  assert.equal(app.db.ocupado, false);
+});
+
+test('B2: no valida ni guarda simultáneamente con una lectura pendiente', async () => {
+  const app = await entornoNuevo();
+  const datos = app.db.exportarDB();
+  let liberar;
+  const esperando = new Promise(resolve => { liberar = resolve; });
+  const file = archivo('copia-prueba.db', datos);
+  file.getFile = async () => { await esperando; return { arrayBuffer: async () => datos.buffer }; };
+  const validando = app.db.validarBackup(file);
+  await assert.rejects(app.db.validarBackup(file), /operación.*curso/);
+  await assert.rejects(app.db.saveProyecto(proyecto, true), /operación.*curso/);
+  liberar();
+  assert.equal((await validando).valido, true);
+  assert.equal(app.db.getProyectos().length, 0);
+});
+
+test('B1: crea respaldo validado sin leer el archivo activo ni cambiar conexión o datos', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const datos = app.db.exportarDB();
+  const conexion = app.store.get('vertex_db');
+  const activo = app.window.seleccion.file;
+  const destino = archivo('VERTEX_backup_prueba.db');
+  activo.errorLectura = new Error('No debe leer el archivo activo para respaldar el estado confirmado');
+  let sugerido;
+  app.window.showSaveFilePicker = async opciones => { sugerido = opciones.suggestedName; return destino; };
+  const resultado = await app.db.crearBackup();
+  assert.match(sugerido, /^VERTEX_backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.db$/);
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.tamano, datos.length);
+  assert.equal(resultado.versionEsquema, 3);
+  assert.equal(resultado.ubicacion, destino.name);
+  assert.equal(destino.escrituras, 1);
+  assert.deepEqual(destino.datos, datos);
+  assert.deepEqual(activo.datos, datos);
+  assert.ok(app.store.get('vertex_db') === conexion);
+  assert.deepEqual(app.db.exportarDB(), datos);
+  assert.ok(app.eventos.some(evento => evento.estado === 'en_curso'));
+  assert.ok(app.eventos.some(evento => evento.estado === 'exitosa' && evento.tamano === datos.length));
+  assert.equal((await app.db.validarBackup(destino)).valido, true);
+});
+
+test('B1: crea copia en carpeta independiente sin reemplazar archivos existentes', async () => {
+  const app = await entornoNuevo();
+  const activa = app.store.get('vertex_db');
+  const destino = carpeta();
+  destino.name = 'Respaldos sintéticos';
+  app.window.showDirectoryPicker = async () => destino;
+  const resultado = await app.db.crearBackup({ enCarpeta: true });
+  assert.equal(resultado.ok, true);
+  assert.ok(resultado.ubicacion.startsWith('Respaldos sintéticos / VERTEX_backup_'));
+  assert.equal(destino.respaldos.size, 1);
+  assert.ok(app.store.get('vertex_db') === activa);
+  const existente = archivo('copia-existente.db', new Uint8Array([5, 6, 7]));
+  destino.getFileHandle = async () => existente;
+  await assert.rejects(app.db.crearBackup({ enCarpeta: true }), /Ya existe un respaldo/);
+  assert.equal(existente.escrituras, 0);
+  assert.deepEqual(Array.from(existente.datos), [5, 6, 7]);
+});
+
+for (const tipo of ['activo', 'alias activo', 'con contenido', 'identidad no verificable']) {
+  test('B1: rechaza destino ' + tipo + ' antes de escribir', async () => {
+    const app = await entornoNuevo();
+    const activo = app.window.seleccion.file;
+    const original = activo.datos.slice();
+    const destino = tipo === 'activo' ? activo : archivo('destino.db');
+    if (tipo === 'alias activo') destino.isSameEntry = async () => true;
+    if (tipo === 'con contenido') destino.datos = new Uint8Array([9]);
+    if (tipo === 'identidad no verificable') destino.isSameEntry = undefined;
+    const escrituras = destino.escrituras;
+    app.window.showSaveFilePicker = async () => destino;
+    await assert.rejects(app.db.crearBackup(), /respaldo no pudo confirmarse/);
+    assert.equal(destino.escrituras, escrituras);
+    assert.deepEqual(activo.datos, original);
+  });
+}
+
+for (const enCarpeta of [false, true]) {
+  test('B1: cancelar selector ' + (enCarpeta ? 'de carpeta' : 'de archivo') + ' no escribe ni confirma éxito', async () => {
+    const app = await entornoNuevo();
+    const datos = app.db.exportarDB();
+    const cancelar = async () => { throw errorArchivoPrueba('AbortError'); };
+    app.window.showSaveFilePicker = cancelar;
+    app.window.showDirectoryPicker = cancelar;
+    const resultado = await app.db.crearBackup({ enCarpeta });
+    assert.equal(resultado.cancelado, true);
+    assert.equal(app.db.ocupado, false);
+    assert.deepEqual(app.db.exportarDB(), datos);
+    assert.equal(app.eventos.filter(evento => evento.estado === 'exitosa').length, 0);
+    assert.equal(app.eventos.filter(evento => evento.estado === 'cancelada').length, 1);
+  });
+}
+
+for (const tipo of ['createWritable', 'write', 'close', 'relectura', 'bytes distintos', 'validación posterior']) {
+  test('B1: ' + tipo + ' fallido nunca confirma el respaldo; permite reintentar', async () => {
+    const app = await entornoNuevo();
+    const original = app.db.exportarDB();
+    const destino = archivo('destino.db');
+    if (tipo === 'createWritable') destino.errorWritable = new Error('createWritable falló');
+    if (tipo === 'write') destino.fallo = true;
+    if (tipo === 'close') destino.falloCierre = true;
+    if (['relectura', 'bytes distintos'].includes(tipo)) {
+      const obtener = destino.getFile.bind(destino);
+      destino.getFile = async () => {
+        if (destino.escrituras) {
+          if (tipo === 'relectura') throw errorArchivoPrueba('NotReadableError');
+          return { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+        }
+        return obtener();
+      };
+    }
+    const validarOriginal = app.esquema.validar;
+    if (tipo === 'validación posterior') {
+      let llamadas = 0;
+      app.esquema.validar = db => {
+        if (++llamadas === 2) throw new Error('Validación posterior fallida');
+        return validarOriginal(db);
+      };
+    }
+    app.window.showSaveFilePicker = async () => destino;
+    await assert.rejects(app.db.crearBackup(), /respaldo no pudo confirmarse/);
+    assert.equal(app.eventos.filter(evento => evento.estado === 'exitosa').length, 0);
+    assert.equal(app.eventos.filter(evento => evento.estado === 'fallida').length, 1);
+    assert.equal(app.db.ocupado, false);
+    assert.deepEqual(app.db.exportarDB(), original);
+    app.esquema.validar = validarOriginal;
+    const nuevo = archivo('reintento.db');
+    app.window.showSaveFilePicker = async () => nuevo;
+    assert.equal((await app.db.crearBackup()).ok, true);
+    assert.deepEqual(nuevo.datos, original);
+  });
+}
+
+test('B1: espera close y bloquea respaldos, validaciones, exportaciones y guardados concurrentes', async () => {
+  const app = await entornoNuevo();
+  const original = app.db.exportarDB();
+  let liberar;
+  const destino = archivo('pendiente.db');
+  destino.esperarCierre = new Promise(resolve => { liberar = resolve; });
+  app.window.showSaveFilePicker = async () => destino;
+  const respaldando = app.db.crearBackup();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(destino.escrituras, 0);
+  assert.equal(app.eventos.filter(evento => evento.estado === 'exitosa').length, 0);
+  await assert.rejects(app.db.crearBackup(), /operación.*curso/);
+  await assert.rejects(app.db.validarBackup(destino), /operación.*curso/);
+  await assert.rejects(app.db.saveProyecto(proyecto, true), /operación.*curso/);
+  assert.throws(() => app.db.exportarDB(), /Espere antes de exportar/);
+  liberar();
+  assert.equal((await respaldando).ok, true);
+  assert.deepEqual(destino.datos, original);
+  assert.equal(app.db.getProyectos().length, 0);
+});
+
+test('B1: aborto al crear destino en carpeta es fallo, no cancelación del usuario', async () => {
+  const app = await entornoNuevo();
+  const destino = carpeta();
+  destino.getFileHandle = async (nombre, opciones) => {
+    throw errorArchivoPrueba(opciones?.create ? 'AbortError' : 'NotFoundError');
+  };
+  app.window.showDirectoryPicker = async () => destino;
+  await assert.rejects(app.db.crearBackup({ enCarpeta: true }), /respaldo no pudo confirmarse/);
+  assert.equal(app.eventos.filter(evento => evento.estado === 'cancelada').length, 0);
+  assert.equal(app.eventos.filter(evento => evento.estado === 'fallida').length, 1);
+});
+
+test('B1: respaldo validado y reabierto desde archivos temporales reales con datos sintéticos', async contexto => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const original = app.db.exportarDB();
+  const temporal = fs.mkdtempSync(path.join(os.tmpdir(), 'vertex-b1-'));
+  contexto.after(() => fs.rmSync(temporal, { recursive: true, force: true }));
+  const destinoPath = path.join(temporal, 'VERTEX_backup_sintetico.db');
+  fs.writeFileSync(destinoPath, new Uint8Array());
+  const destino = {
+    kind: 'file', name: 'VERTEX_backup_sintetico.db',
+    async isSameEntry() { return false; },
+    async getFile() {
+      const datos = new Uint8Array(await fs.promises.readFile(destinoPath));
+      return { arrayBuffer: async () => datos.buffer };
+    },
+    async createWritable() {
+      const staging = destinoPath + '.pending';
+      const stream = await fs.promises.open(staging, 'wx');
+      return {
+        async write(datos) { await stream.writeFile(datos); },
+        async close() { await stream.close(); await fs.promises.rename(staging, destinoPath); },
+        async abort() { await stream.close(); await fs.promises.rm(staging, { force: true }); }
+      };
+    }
+  };
+  app.window.showSaveFilePicker = async () => destino;
+  assert.equal((await app.db.crearBackup()).ok, true);
+  const bytes = new Uint8Array(fs.readFileSync(destinoPath));
+  assert.equal(Buffer.compare(Buffer.from(bytes), Buffer.from(original)), 0);
+  assert.equal((await app.db.validarBackup(destino)).valido, true);
+  const reapertura = entorno(archivo('copia-temporal.db', bytes));
+  await reapertura.db.init();
+  assert.equal(reapertura.db.getProyectos()[0].nombre, proyecto.nombre);
+  assert.deepEqual(app.db.exportarDB(), original);
+});
+
+test('B2: valida sin conexión activa y rechaza motor no inicializado', async () => {
+  const creadora = await entornoNuevo();
+  const copia = archivo('copia-sintetica.db', creadora.db.exportarDB());
+  const app = entorno();
+  await assert.rejects(app.db.validarBackup(copia), /motor SQLite/);
+  await app.db.init();
+  assert.equal((await app.db.validarBackup(copia)).valido, true);
+  assert.equal(app.db.tieneArchivo, false);
+  assert.equal(copia.escrituras, 0);
 });
 
 test('crear una base requiere confirmación y no copia los datos de otra base', async () => {

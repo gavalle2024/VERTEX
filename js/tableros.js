@@ -185,42 +185,69 @@
     const responsablesHTML = responsables.map(responsable =>
       `<span class="work-badge${responsable.archivado ? ' work-badge-inactive' : ''}">${e(responsable.nombre)}${responsable.archivado ? ' · Inactivo' : ''}</span>`
     ).join('');
+    const destinoDeshabilitado = bloqueada || tarjeta.archivada || PSA.DB.ocupado;
+    const posicionAnteriorDeshabilitada = noMovible || arrastreDeshabilitado || posicion <= 0;
+    const posicionSiguienteDeshabilitada = noMovible || arrastreDeshabilitado ||
+      posicion < 0 || posicion === tarjetasActivas.length - 1;
     return `<article class="work-card${prioridad}${tarjeta.completada ? ' work-complete' : ''}${seleccionada ? ' work-selected' : ''}"
       data-card-id="${e(tarjeta.id)}" data-archived="${tarjeta.archivada ? 'true' : 'false'}">
-      ${noMovible || arrastreDeshabilitado ? '' : `<span class="work-drag-handle" draggable="true" title="Arrastre desde este control para mover solo esta tarjeta"
-        aria-label="Arrastrar ${e(tarjeta.titulo)}">↕ Arrastrar</span>`}
-      <label class="work-select"><input class="tarjeta-seleccion" type="checkbox" data-id="${e(tarjeta.id)}"
-        aria-label="Seleccionar ${e(tarjeta.titulo)}"${seleccionada ? ' checked' : ''}${bloqueada || tarjeta.archivada ? ' disabled' : ''}>
-        <span>${seleccionada ? 'Seleccionada' : 'Seleccionar tarjeta'}</span></label>
-      <h4>${_boton(tarjeta.titulo, 'tarjeta', tarjeta.id)}</h4>
-      <div class="work-badges"><span class="work-badge work-badge-priority">Prioridad: ${e(prioridadNombre)}</span>${etiquetasHTML}</div>
-      <div class="work-badges">${responsablesHTML || '<span class="work-badge">Sin responsables</span>'}</div>
-      <p class="work-meta">${tarjeta.completada ? 'Completada' : ''}${tarjeta.archivada ? ' · Archivada' : ''}</p>
-      ${tarjeta.inicio ? `<p class="work-meta">Inicio: ${e(PSA.formatFecha(tarjeta.inicio))}</p>` : ''}
-      <p class="${vencida ? 'work-overdue' : 'work-meta'}">${
-        !tarjeta.vencimiento ? 'Sin vencimiento' : vencida ? 'Vencida · ' :
-          tarjeta.completada ? 'Vencimiento cumplido · ' :
-            tarjeta.vencimiento <= fechaProxima ? 'Vence pronto · ' : 'Vencimiento · '
-      }${tarjeta.vencimiento ? e(PSA.formatFecha(tarjeta.vencimiento)) : ''}</p>
-      <div class="actions no-print work-card-move">
-        ${_boton('Historial', 'historial-tarjeta', tarjeta.id, PSA.DB.ocupado)}
-        ${_boton('Subir en la etapa', 'tarjeta-posicion-anterior', tarjeta.id,
-          noMovible || arrastreDeshabilitado || posicion <= 0)}
-        ${_boton('Bajar en la etapa', 'tarjeta-posicion-siguiente', tarjeta.id,
-          noMovible || arrastreDeshabilitado || posicion < 0 || posicion === tarjetasActivas.length - 1)}
-        ${_boton('Etapa anterior', 'tarjeta-anterior', tarjeta.id, bloqueada || tarjeta.archivada || PSA.DB.ocupado)}
-        ${_boton('Etapa siguiente', 'tarjeta-siguiente', tarjeta.id,
-          bloqueada || tarjeta.archivada || PSA.DB.ocupado)}
-        <label class="work-destination">Destino específico
-          <select class="tarjeta-destino" data-id="${e(tarjeta.id)}" aria-label="Destino de ${e(tarjeta.titulo)}"
-            ${bloqueada || tarjeta.archivada || PSA.DB.ocupado ? ' disabled' : ''}>
-            <option value="">Seleccione etapa</option>${_opciones(listas, '', 'nombre')}
-          </select>
-        </label>
-        ${_boton('Mover tarjeta', 'mover-tarjeta', tarjeta.id, bloqueada || tarjeta.archivada || PSA.DB.ocupado)}
-        ${_boton(tarjeta.archivada ? 'Restaurar tarjeta' : 'Archivar tarjeta',
-          'archivo-tarjeta', tarjeta.id, bloqueada || PSA.DB.ocupado)}
+      <div class="work-card-top no-print">
+        <div class="work-card-tools">
+          ${noMovible || arrastreDeshabilitado ? '' : `<span class="work-drag-handle" draggable="true" title="Arrastrar tarjeta"
+            aria-label="Arrastrar ${e(tarjeta.titulo)}">⠿</span>`}
+          <label class="work-select" title="Seleccionar tarjeta">
+            <input class="tarjeta-seleccion" type="checkbox" data-id="${e(tarjeta.id)}"
+              aria-label="Seleccionar ${e(tarjeta.titulo)}"${seleccionada ? ' checked' : ''}${bloqueada || tarjeta.archivada ? ' disabled' : ''}>
+            <span>Seleccionar ${e(tarjeta.titulo)}</span>
+          </label>
+        </div>
+        <details class="work-card-menu">
+          <summary aria-label="Acciones de ${e(tarjeta.titulo)}" title="Acciones">⋮</summary>
+          <div class="work-card-menu-panel" aria-label="Acciones de tarjeta">
+            ${_boton('Ver historial', 'historial-tarjeta', tarjeta.id, PSA.DB.ocupado)}
+            ${_boton('Editar tarjeta', 'tarjeta', tarjeta.id, PSA.DB.ocupado || bloqueada || tarjeta.archivada)}
+            ${_boton('Subir en la etapa', 'tarjeta-posicion-anterior', tarjeta.id, posicionAnteriorDeshabilitada)}
+            ${_boton('Bajar en la etapa', 'tarjeta-posicion-siguiente', tarjeta.id, posicionSiguienteDeshabilitada)}
+            ${_boton('Mover a etapa anterior', 'tarjeta-anterior', tarjeta.id, destinoDeshabilitado ||
+              listas.findIndex(lista => lista.id === tarjeta.lista_id) <= 0)}
+            ${_boton('Mover a etapa siguiente', 'tarjeta-siguiente', tarjeta.id, destinoDeshabilitado ||
+              listas.findIndex(lista => lista.id === tarjeta.lista_id) < 0 ||
+              listas.findIndex(lista => lista.id === tarjeta.lista_id) === listas.length - 1)}
+            ${_boton('Mover a etapa específica…', 'mostrar-destino', tarjeta.id, destinoDeshabilitado)}
+            <div class="work-card-specific-destination" hidden>
+              <label for="destino-${e(tarjeta.id)}">Etapa de destino</label>
+              <select class="tarjeta-destino" id="destino-${e(tarjeta.id)}" data-id="${e(tarjeta.id)}"
+                aria-label="Destino de ${e(tarjeta.titulo)}"${destinoDeshabilitado ? ' disabled' : ''}>
+                <option value="">Seleccione etapa</option>${_opciones(listas, '', 'nombre')}
+              </select>
+              ${_boton('Confirmar movimiento', 'mover-tarjeta', tarjeta.id, destinoDeshabilitado)}
+            </div>
+            ${_boton(tarjeta.archivada ? 'Restaurar tarjeta' : 'Archivar tarjeta',
+              'archivo-tarjeta', tarjeta.id, bloqueada || PSA.DB.ocupado)}
+          </div>
+        </details>
       </div>
+      <h4>${_boton(tarjeta.titulo, 'tarjeta', tarjeta.id)}</h4>
+      <div class="work-card-primary">
+        <div class="work-badges">
+          <span class="work-badge work-badge-priority">${e(prioridadNombre || 'Sin prioridad')}</span>
+          ${responsablesHTML || '<span class="work-badge">Sin responsables</span>'}
+        </div>
+        <p class="${vencida ? 'work-overdue' : 'work-meta work-due'}">${
+          !tarjeta.vencimiento ? 'Sin vencimiento' : vencida ? 'Vencida · ' :
+            tarjeta.completada ? 'Vencimiento cumplido · ' :
+              tarjeta.vencimiento <= fechaProxima ? 'Vence pronto · ' : 'Vence · '
+        }${tarjeta.vencimiento ? e(PSA.formatFecha(tarjeta.vencimiento)) : ''}</p>
+      </div>
+      ${(tarjeta.inicio || etiquetasHTML || tarjeta.completada || tarjeta.archivada) ? `<details class="work-card-more">
+        <summary>Más información</summary>
+        <div class="work-card-more-content">
+          ${tarjeta.inicio ? `<p class="work-meta">Inicio: ${e(PSA.formatFecha(tarjeta.inicio))}</p>` : ''}
+          ${etiquetasHTML ? `<div class="work-badges">${etiquetasHTML}</div>` : ''}
+          ${tarjeta.completada ? '<span class="work-state">Completada</span>' : ''}
+          ${tarjeta.archivada ? '<span class="work-state">Archivada</span>' : ''}
+        </div>
+      </details>` : ''}
     </article>`;
   }
 
@@ -296,19 +323,26 @@
       const tarjetasActivas = contenidoCompleto.filter(t => !t.archivada);
       return `<section class="kanban-list${lista.categoria === 'bloqueado' ? ' work-blocked' : ''}"
         data-list-id="${e(lista.id)}" data-inactive="${inactiva ? 'true' : 'false'}" aria-label="${e(lista.nombre)}">
-        <h3>${e(lista.nombre)}${lista.archivado ? ' · Archivada' : ''}</h3>
-        <p class="work-meta">${e(CATEGORIAS[lista.categoria])} · ${contenido.length} visible(s)</p>
-        <div class="actions no-print">
-          ${_boton('Editar lista', 'lista', lista.id, inactiva || PSA.DB.ocupado)}
-          ${_boton('Ordenar lista antes', 'lista-anterior', lista.id, inactiva || indice <= 0 || PSA.DB.ocupado)}
-          ${_boton('Ordenar lista después', 'lista-siguiente', lista.id, inactiva || indice === activas.length - 1 || PSA.DB.ocupado)}
-          ${_boton(lista.archivado ? 'Restaurar lista' : 'Archivar lista', 'archivo-lista', lista.id, bloqueado || PSA.DB.ocupado)}
-          ${_boton('Seleccionar todas en esta etapa (' + movibles.length + ')', 'seleccionar-etapa', lista.id,
-            inactiva || !movibles.length || PSA.DB.ocupado)}
-        </div>
+        <header class="kanban-list-header">
+          <div class="kanban-list-heading">
+            <h3>${e(lista.nombre)}${lista.archivado ? ' · Archivada' : ''}</h3>
+            <p class="work-meta">${contenido.length} ${contenido.length === 1 ? 'tarjeta visible' : 'tarjetas visibles'}</p>
+          </div>
+          <details class="work-list-menu">
+            <summary aria-label="Acciones de la etapa ${e(lista.nombre)}" title="Acciones de etapa">⋮</summary>
+            <div class="work-list-menu-panel" aria-label="Acciones de etapa">
+              ${_boton('Editar etapa', 'lista', lista.id, inactiva || PSA.DB.ocupado)}
+              ${_boton('Ordenar etapa antes', 'lista-anterior', lista.id, inactiva || indice <= 0 || PSA.DB.ocupado)}
+              ${_boton('Ordenar etapa después', 'lista-siguiente', lista.id, inactiva || indice === activas.length - 1 || PSA.DB.ocupado)}
+              ${_boton('Seleccionar todas las tarjetas (' + movibles.length + ')', 'seleccionar-etapa', lista.id,
+                inactiva || !movibles.length || PSA.DB.ocupado)}
+              ${_boton(lista.archivado ? 'Reactivar etapa' : 'Archivar etapa', 'archivo-lista', lista.id, bloqueado || PSA.DB.ocupado)}
+            </div>
+          </details>
+        </header>
         <div class="work-cards">${contenido.map(t => _tarjetaHTML(t, inactiva, activas, tarjetasActivas)).join('') ||
-          `<p class="empty">${filtrosActivos ? 'Ninguna tarjeta coincide en esta etapa.' : 'Sin tarjetas visibles en esta lista.'}</p>`}</div>
-        <div class="actions no-print">${_boton('Crear tarjeta', 'nueva-tarjeta', lista.id, inactiva || PSA.DB.ocupado)}</div>
+          `<p class="empty kanban-list-empty">${filtrosActivos ? 'Sin coincidencias' : 'Sin tarjetas'}</p>`}</div>
+        <div class="kanban-list-footer no-print">${_boton('+ Crear tarjeta', 'nueva-tarjeta', lista.id, inactiva || PSA.DB.ocupado)}</div>
       </section>`;
     }).join('') : '<p class="empty">No hay listas visibles. Cree la primera lista o active «Incluir listas y tarjetas archivadas» para restaurarlas.</p>';
     const resumenFiltros = [];
@@ -900,6 +934,20 @@
     if (!boton || boton.disabled || PSA.DB.ocupado) return;
     const accion = boton.dataset.accion;
     const id = boton.dataset.id;
+    const menu = boton.closest('.work-card-menu, .work-list-menu');
+    if (accion === 'mostrar-destino') {
+      const panel = boton.closest('.work-card').querySelector('.work-card-specific-destination');
+      if (panel) {
+        panel.hidden = false;
+        panel.querySelector('select')?.focus();
+      }
+      return;
+    }
+    if (menu) {
+      menu.open = false;
+      const panelDestino = menu.querySelector('.work-card-specific-destination');
+      if (panelDestino) panelDestino.hidden = true;
+    }
     $('tableros-error').textContent = '';
     try {
       if (accion === 'abrir') {
@@ -944,9 +992,10 @@
         PSA.Trabajo.getTarjetas().filter(t => t.lista_id === id && !t.archivada && _coincideTarjeta(t, filtros)).forEach(t =>
           tarjetasSeleccionadas.add(t.id));
         _renderDetalle();
-        const botonEtapa = Array.from($('tablero-columnas').querySelectorAll('[data-accion="seleccionar-etapa"]'))
-          .find(elemento => elemento.dataset.id === id);
-        if (botonEtapa) botonEtapa.focus();
+        const resumenEtapa = $('tablero-columnas').querySelector(
+          `.kanban-list[data-list-id="${CSS.escape(id)}"] .work-list-menu > summary`
+        );
+        if (resumenEtapa) resumenEtapa.focus();
       }
       else if (accion === 'lista-anterior' || accion === 'lista-siguiente') {
         const ids = PSA.Trabajo.getListas(tableroId).filter(l => !l.archivado).map(l => l.id);
@@ -956,8 +1005,9 @@
         [ids[indice], ids[destino]] = [ids[destino], ids[indice]];
         await PSA.Trabajo.reordenarListas(tableroId, ids);
         render();
-        const equivalente = Array.from($('tablero-columnas').querySelectorAll('button')).find(b =>
-          b.dataset.id === id && b.dataset.accion === 'lista');
+        const equivalente = $('tablero-columnas').querySelector(
+          `.kanban-list[data-list-id="${CSS.escape(id)}"] .work-list-menu > summary`
+        );
         if (equivalente) equivalente.focus();
         PSA.toast('Orden de listas guardado.');
       }
@@ -978,6 +1028,26 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     $('v-tableros').addEventListener('click', _accion);
+    document.addEventListener('click', event => {
+      document.querySelectorAll('.work-card-menu[open], .work-list-menu[open]').forEach(menu => {
+        if (!menu.contains(event.target)) {
+          menu.open = false;
+          const panel = menu.querySelector('.work-card-specific-destination');
+          if (panel) panel.hidden = true;
+        }
+      });
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      const menu = document.querySelector('.work-card-menu[open], .work-list-menu[open]');
+      if (!menu) return;
+      const resumen = menu.querySelector('summary');
+      menu.open = false;
+      const panel = menu.querySelector('.work-card-specific-destination');
+      if (panel) panel.hidden = true;
+      resumen?.focus();
+      event.stopPropagation();
+    });
     $('tablero-columnas').addEventListener('dragstart', _iniciarArrastre);
     $('tablero-columnas').addEventListener('dragenter', _actualizarDestinoArrastre);
     $('tablero-columnas').addEventListener('dragover', _actualizarDestinoArrastre);

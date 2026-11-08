@@ -101,12 +101,15 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 - No inicializar archivos existentes de cero bytes. Crear solo tras confirmación de ausencia; no confiar en una marca `nueva` recordada. `conectarArchivo()` abre existentes con `showOpenFilePicker`; crear bases continúa siendo una acción explícita de carpeta.
 - Antes de guardar, comprobar permiso y bytes del archivo respecto del estado confirmado. Reautorizar el handle activo no recarga SQLite ni descarta formularios: devuelve `reautorizada` y requiere reintento explícito. No confundir AbortError de Writable con cancelación de selector.
 - No permitir operaciones concurrentes ni escrituras con debounce. La instancia visible solo cambia después de `write()` y `close()` exitosos.
+- B1/B2: `crearBackup({enCarpeta})` exporta el estado confirmado a un destino independiente y solo confirma tras relectura, igualdad binaria y validación integral. `validarBackup(handle)` no migra ni modifica el origen. Rechazar destino activo/con contenido e identidad no verificable; no restaurar ni cambiar de conexión. B3/B4 pendientes de revisión.
 - `PSA.DB.estado` y el evento `psa:db-state` centralizan conexión, ubicación, ocupación y errores. Reutilizarlos para actualizar la UI.
 - No prometer acceso por una ruta escrita ni mostrar nombres de carpeta como rutas absolutas. El navegador requiere selección autorizada.
 - `PSA.DB.transaccion(tx => …)` admite una función síncrona: reutilizar `tx.run/all` con parámetros y registrar eventos dentro de la misma operación. Nunca escribir entidades y actividad por separado.
 - Las ediciones idempotentes de catálogos, tableros, listas, tarjetas y asignaciones no deben actualizar `updated_at`, reescribir relaciones idénticas ni registrar actividad; repetir el orden actual de listas también es no-op. Cubrirlo con pruebas sintéticas sin abrir la base habitual.
 - Habilitar FK en cada instancia y después de exportar: sql.js reinicia pragmas al reabrir durante `export()`.
 - No aplicar migraciones de archivos existentes sin consentimiento y respaldo exacto verificado. Rechazar versiones futuras, esquemas ajenos y cambios externos durante el proceso.
+- La restauración B3 se realiza solo hacia un archivo nuevo elegido mediante carpeta; no sobrescribir el backup ni la conexión activa. Validar el destino después de write/close/relectura y conservar la conexión actual.
+- El historial B4 reside en IndexedDB independiente, registra únicamente metadatos y no puede convertir un backup/restauración ya verificado en fallo. La interfaz de Administración de datos no debe usar handlers ni estilos inline.
 - Reutilizar `PSA.Trabajo` en la UI, sin SQL ni persistencia alternativa en las vistas. El editor único `trabajo-dialog` sirve a tableros, listas y tarjetas; no duplicar formularios ni notificaciones.
 - Mantener el detalle archivado en solo lectura y exigir contenedores activos para restaurar hijos. Diferenciar ordenar columnas (`reordenarListas`) de mover tarjetas (`moverTarjeta`/`moverTarjetas`); usar IDs explícitos y nunca alterar tareas no seleccionadas. El movimiento múltiple debe validar todo y ejecutarse en una sola transacción.
 - Para DnD, usar únicamente el control `.work-drag-handle` como origen y `moverTarjeta(id, listaId, posicion)` para persistir posiciones. El arrastre es siempre individual; la selección múltiple conserva sus acciones explícitas. Mantener una alternativa por teclado y no declarar soporte táctil sin implementarlo y probarlo.
@@ -227,3 +230,18 @@ El panel fase 7 es de lectura y no modifica el esquema. Filtra entidades archiva
 - Al abrir la app, usar **«Seleccionar carpeta»**; elegir `db/` u otra carpeta con `vertex.db`. La cabecera permite **«Cambiar carpeta de base de datos»**.
 - En sesiones siguientes, la app intenta reconectarse automáticamente; si el permiso expiró aparece **«Reconectar vertex.db»**.
 - Sin internet: sql.js no carga (WASM desde CDN); la app muestra error.
+
+
+## Presentación de tarjetas Kanban
+
+- Mantener visibles en cada tarjeta el título, prioridad, responsables y vencimiento.
+- Fecha de inicio, etiquetas y estados secundarios van en «Más información».
+- Historial, edición, orden, movimientos y archivado se agrupan en el menú contextual `details`; no volver a mostrar todos esos controles permanentemente.
+- El selector de destino específico se despliega bajo demanda.
+- Mantener la casilla de selección independiente y el único origen DnD `.work-drag-handle`.
+- El menú contextual debe poder usarse con teclado y toque, cerrarse con Escape o clic exterior y permanecer dentro del flujo de documento para evitar recortes del contenedor Kanban.
+
+
+## Tema visual
+
+El tema claro/oscuro se administra mediante `PSA.Tema` en `js/app.js`, el atributo `data-theme` del elemento raíz y variables/overrides CSS en `css/styles.css`. La preferencia se guarda en `localStorage` (`vertex-theme`); el valor predeterminado es `light`. No usar estilos inline ni cambiar datos SQLite al alternar el tema.

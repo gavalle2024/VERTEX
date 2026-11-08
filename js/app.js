@@ -9,6 +9,48 @@
    ════════════════════════════════════════ */
 window.PSA = window.PSA || {};
 
+/* ── Tema visual: preferencia local independiente de SQLite ── */
+PSA.Tema = (function () {
+  const CLAVE = 'vertex-theme';
+  const VALIDOS = new Set(['light', 'dark']);
+
+  function aplicar(tema, guardar = true) {
+    const elegido = VALIDOS.has(tema) ? tema : 'light';
+    document.documentElement.dataset.theme = elegido;
+    const boton = document.getElementById('btn-theme-toggle');
+    if (boton) {
+      const oscuro = elegido === 'dark';
+      boton.setAttribute('aria-pressed', String(oscuro));
+      boton.setAttribute('aria-label', oscuro ? 'Activar modo claro' : 'Activar modo oscuro');
+      const icono = boton.querySelector('.theme-toggle-icon');
+      const etiqueta = boton.querySelector('.theme-toggle-label');
+      if (icono) icono.textContent = oscuro ? '☀️' : '🌙';
+      if (etiqueta) etiqueta.textContent = oscuro ? 'Modo claro' : 'Modo oscuro';
+    }
+    if (guardar) {
+      try { localStorage.setItem(CLAVE, elegido); }
+      catch (error) { console.warn('[VERTEX] No se pudo guardar la preferencia de tema:', error); }
+    }
+    return elegido;
+  }
+
+  function inicializar() {
+    let guardado = null;
+    try { guardado = localStorage.getItem(CLAVE); }
+    catch (error) { console.warn('[VERTEX] No se pudo leer la preferencia de tema:', error); }
+    // Sin preferencia explícita, VERTEX inicia en modo claro.
+    aplicar(VALIDOS.has(guardado) ? guardado : 'light', false);
+  }
+
+  function alternar() {
+    const actual = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    return aplicar(actual === 'dark' ? 'light' : 'dark');
+  }
+
+  return { aplicar, inicializar, alternar };
+})();
+PSA.Tema.inicializar();
+
 /* ── Escapa HTML para prevenir XSS ── */
 PSA.escapeHtml = function (s) {
   if (s === undefined || s === null) return '';
@@ -34,6 +76,8 @@ PSA.genId = function () {
 
 /* ── Toast de notificación ── */
 let _toastTimer = null;
+let _restauracionUIPreparada = false;
+let _modoSelectorRespaldo = null;
 PSA.toast = function (msg, tipo) {
   const t = document.getElementById('toast');
   if (!t) return;
@@ -88,6 +132,7 @@ document.addEventListener('click', event => {
   const boton = event.target.closest('button[data-action]');
   if (!boton) return;
   switch (boton.dataset.action) {
+    case 'theme-toggle': PSA.Tema.alternar(); break;
     case 'db-connect': PSA.gestionarConexionDB(); break;
     case 'db-connect-folder': PSA.gestionarConexionDB(true); break;
     case 'migration-confirm': PSA.confirmarMigracion(); break;
@@ -98,6 +143,12 @@ document.addEventListener('click', event => {
     case 'project-export-csv': PSA.Proyectos.exportarCSV(); break;
     case 'project-export-db': PSA.Proyectos.exportarDB(); break;
     case 'page-print': window.print(); break;
+    case 'backup-create': PSA.crearBackupUI(); break;
+    case 'backup-validate': PSA.validarBackupUI(); break;
+    case 'restore-prepare': PSA.prepararRestauracionUI(); break;
+    case 'restore-apply': PSA.restaurarBackupUI(); break;
+    case 'restore-cancel': PSA.cancelarRestauracionUI(); break;
+    case 'backup-history-refresh': PSA.actualizarHistorialBackupsUI(); break;
   }
 });
 
@@ -113,6 +164,211 @@ PSA.renderTodo = function () {
   PSA.Calendario.render();
   PSA.Actividad.render();
 };
+
+function _estadoDatos(mensaje, error = false) {
+  const estado = document.getElementById('datos-operacion-status');
+  const alerta = document.getElementById('datos-operacion-error');
+  if (estado) estado.textContent = error ? '' : (mensaje || '');
+  if (alerta) alerta.textContent = error ? (mensaje || '') : '';
+}
+
+function _actualizarControlesRestauracion() {
+  const aplicar = document.querySelector('[data-action="restore-apply"]');
+  const cancelar = document.querySelector('[data-action="restore-cancel"]');
+  if (aplicar) aplicar.disabled = !_restauracionUIPreparada || PSA.DB.ocupado || !PSA.DB.tieneArchivo;
+  if (cancelar) cancelar.disabled = !_restauracionUIPreparada || PSA.DB.ocupado;
+}
+
+PSA.crearBackupUI = async function () {
+  if (PSA.DB.ocupado || !PSA.DB.tieneArchivo) return;
+  _estadoDatos('Creando copia de seguridad…');
+  try {
+    const resultado = await PSA.DB.crearBackup();
+    if (resultado.ok) _estadoDatos('Copia creada y verificada: ' + resultado.ubicacion + ' (' + resultado.tamano + ' bytes).');
+    else _estadoDatos('Creación de copia cancelada.');
+  } catch (error) {
+    _estadoDatos(error.message, true);
+  }
+  await PSA.actualizarHistorialBackupsUI();
+};
+
+function _abrirSelectorRespaldo(modo) {
+  if (PSA.DB.ocupado) {
+    _estadoDatos('Hay una operación de base de datos en curso. Espere a que termine.', true);
+    return;
+  }
+  if (modo === 'restaurar' && !PSA.DB.tieneArchivo) {
+    _estadoDatos('Conecte primero una base de datos para preparar la restauración.', true);
+    return;
+  }
+  if (modo === 'restaurar' && _restauracionUIPreparada) {
+    _estadoDatos('Ya existe una restauración preparada. Cancele esa preparación antes de seleccionar otro respaldo.', true);
+    return;
+  }
+  const input = document.getElementById('datos-restore-file');
+  if (!input) {
+    _estadoDatos('No está disponible el control de selección de respaldos.', true);
+    return;
+  }
+  // input.click() se ejecuta sin await y dentro del gesto del usuario.
+  // Así evitamos depender de la entrega de FileSystemFileHandle por el picker de Chromium.
+  _modoSelectorRespaldo = modo;
+  input.value = '';
+  _estadoDatos(modo === 'restaurar'
+    ? 'Seleccione el archivo de respaldo SQLite. Se validará por su contenido, sin depender de la extensión.'
+    : 'Seleccione el archivo SQLite que desea validar.');
+  try { input.click(); }
+  catch (error) {
+    _modoSelectorRespaldo = null;
+    _estadoDatos('No se pudo abrir el selector de archivos: ' + error.message, true);
+  }
+}
+
+PSA.validarBackupUI = function () {
+  _abrirSelectorRespaldo('validar');
+};
+
+PSA.prepararRestauracionUI = function () {
+  _abrirSelectorRespaldo('restaurar');
+};
+
+async function _procesarArchivoRespaldoSeleccionado(archivo, modo) {
+  if (!archivo) {
+    _estadoDatos('No se seleccionó ningún archivo. No se modificó ningún dato.');
+    return;
+  }
+  _estadoDatos('Archivo seleccionado: ' + archivo.name + '. Leyendo archivo…');
+  try {
+    if (modo === 'validar') {
+      _estadoDatos('Archivo leído. Iniciando validación SQLite…');
+      const resultado = await PSA.DB.validarBackup(archivo);
+      _estadoDatos(resultado.valido
+        ? 'Copia válida: ' + archivo.name + '. Esquema ' + resultado.versionEsquema + ', ' + resultado.tamano + ' bytes.'
+        : 'Copia rechazada (' + resultado.codigo + '): ' + resultado.mensaje, !resultado.valido);
+      return;
+    }
+
+    _estadoDatos('Archivo leído. Iniciando validación SQLite para restauración…');
+    const resultado = await PSA.DB.prepararRestauracion(archivo);
+    _restauracionUIPreparada = resultado.preparada;
+    const detalle = document.getElementById('datos-restore-detail');
+    if (detalle) detalle.textContent = resultado.preparada
+      ? 'Respaldo preparado: ' + resultado.nombre + ' · ' + resultado.tamano + ' bytes · esquema ' + resultado.versionEsquema + '. La restauración creará un archivo nuevo y no cambiará la base activa.'
+      : 'Respaldo no apto: ' + resultado.validacion.mensaje;
+    _estadoDatos(resultado.preparada
+      ? 'Respaldo válido y preparado. Ya puede crear el archivo restaurado.'
+      : 'El archivo «' + archivo.name + '» fue leído, pero no es apto para restaurar: ' + resultado.validacion.mensaje,
+      !resultado.preparada);
+  } catch (error) {
+    _restauracionUIPreparada = false;
+    _estadoDatos('Se seleccionó «' + archivo.name + '», pero ocurrió un error durante la lectura o validación: ' + error.name + ': ' + error.message, true);
+  } finally {
+    _actualizarControlesRestauracion();
+    await PSA.actualizarHistorialBackupsUI();
+  }
+}
+
+const _selectorArchivoRespaldo = document.getElementById('datos-restore-file');
+if (_selectorArchivoRespaldo) {
+  _selectorArchivoRespaldo.addEventListener('change', event => {
+    const input = event.currentTarget;
+    const modo = _modoSelectorRespaldo;
+    _modoSelectorRespaldo = null;
+    const archivo = input.files && input.files[0];
+    void _procesarArchivoRespaldoSeleccionado(archivo, modo || 'restaurar');
+  });
+  _selectorArchivoRespaldo.addEventListener('cancel', () => {
+    _modoSelectorRespaldo = null;
+    _estadoDatos('Selección cancelada por el usuario. No se modificó ningún archivo.');
+  });
+}
+
+PSA.restaurarBackupUI = async function () {
+  if (!_restauracionUIPreparada || PSA.DB.ocupado) return;
+  _estadoDatos('Seleccione el nombre y la ubicación del nuevo archivo restaurado…');
+  try {
+    const resultado = await PSA.DB.restaurarBackup();
+    if (resultado.ok) {
+      _restauracionUIPreparada = false;
+      const detalle = document.getElementById('datos-restore-detail');
+      if (detalle) detalle.textContent = 'Restauración creada: ' + resultado.ubicacion + '. La base activa sigue siendo la misma.';
+      _estadoDatos('Archivo restaurado, releído y validado correctamente. Para trabajar con él, conéctelo mediante el selector habitual.');
+    } else if (resultado.cancelado) {
+      _estadoDatos(resultado.fase === 'selector'
+        ? 'Se canceló el selector del archivo de destino. El respaldo sigue preparado para reintentar.'
+        : 'Restauración cancelada en la confirmación. El respaldo sigue preparado para reintentar.');
+    }
+  } catch (error) {
+    _estadoDatos(error.message, true);
+  }
+  _actualizarControlesRestauracion();
+  await PSA.actualizarHistorialBackupsUI();
+};
+
+PSA.cancelarRestauracionUI = function () {
+  try {
+    PSA.DB.cancelarRestauracion();
+    _restauracionUIPreparada = false;
+    const detalle = document.getElementById('datos-restore-detail');
+    if (detalle) detalle.textContent = 'No hay una restauración preparada.';
+    _estadoDatos('Preparación cancelada. No se modificó ningún archivo.');
+  } catch (error) { _estadoDatos(error.message, true); }
+  _actualizarControlesRestauracion();
+  PSA.actualizarHistorialBackupsUI();
+};
+
+PSA.actualizarHistorialBackupsUI = async function () {
+  const lista = document.getElementById('datos-historial');
+  const vacio = document.getElementById('datos-historial-vacio');
+  const estado = document.getElementById('datos-historial-estado');
+  const boton = document.querySelector('[data-action="backup-history-refresh"]');
+  if (!lista || !vacio || !PSA.DB.listarHistorialBackups) return;
+
+  if (boton) {
+    boton.disabled = true;
+    boton.textContent = 'Actualizando…';
+  }
+  if (estado) estado.textContent = 'Consultando el historial local…';
+
+  try {
+    const registros = await PSA.DB.listarHistorialBackups();
+    lista.replaceChildren();
+    vacio.classList.toggle('hidden', registros.length > 0);
+    vacio.textContent = registros.length ? 'Todavía no hay operaciones registradas.' : 'Todavía no hay operaciones registradas.';
+    registros.forEach(registro => {
+      const item = document.createElement('li');
+      const fecha = new Date(registro.fecha);
+      const fechaTexto = Number.isNaN(fecha.getTime()) ? registro.fecha : fecha.toLocaleString();
+      item.textContent = [fechaTexto, registro.tipo, registro.archivo || 'sin archivo', registro.resultado,
+        registro.tamano === null ? '' : registro.tamano + ' bytes', registro.mensaje].filter(Boolean).join(' · ');
+      lista.appendChild(item);
+    });
+    if (estado) {
+      estado.textContent = registros.length
+        ? 'Historial actualizado: ' + registros.length + ' operación(es). Última consulta: ' + new Date().toLocaleTimeString() + '.'
+        : 'Historial consultado: todavía no hay operaciones registradas. Última consulta: ' + new Date().toLocaleTimeString() + '.';
+    }
+    return registros.length;
+  } catch (error) {
+    vacio.textContent = 'No se pudo consultar el historial: ' + error.message;
+    vacio.classList.remove('hidden');
+    if (estado) estado.textContent = 'Falló la actualización del historial.';
+    console.error('[PSA] No se pudo actualizar el historial de respaldos:', error);
+    return null;
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = 'Actualizar historial';
+    }
+  }
+};
+
+window.addEventListener('psa:backup-state', () => PSA.actualizarHistorialBackupsUI());
+window.addEventListener('psa:restore-state', event => {
+  if (event.detail.estado === 'exitosa' || event.detail.estado === 'cancelada') {
+    PSA.actualizarHistorialBackupsUI();
+  }
+});
 
 /* ════════════════════════════════════════
    Atajos de teclado
@@ -166,6 +422,12 @@ function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, 
   document.querySelectorAll('main, header, nav.tabs').forEach(el => { el.inert = !!requiereMigracion; });
   document.getElementById('v-tableros').inert = !!ocupado;
   document.getElementById('v-tableros').setAttribute('aria-busy', String(!!ocupado));
+  document.querySelectorAll('#v-datos button[data-action]').forEach(el => {
+    if (el.dataset.action === 'backup-history-refresh') return;
+    if (el.dataset.action === 'backup-validate') el.disabled = !!ocupado || !useSQLite;
+    else el.disabled = !!ocupado || !tieneArchivo;
+  });
+  _actualizarControlesRestauracion();
   document.getElementById('v-calendario').setAttribute('aria-busy', String(!!ocupado));
   document.getElementById('v-actividad').setAttribute('aria-busy', String(!!ocupado));
   PSA.Tableros.actualizarEstado();
@@ -313,4 +575,5 @@ window.addEventListener('beforeunload', e => {
   }
 
   PSA.renderTodo();
+  PSA.actualizarHistorialBackupsUI();
 })();

@@ -6,6 +6,9 @@
   const IDB_NAME = 'psa_fs_v1';
   const IDB_STORE = 'handles';
   const IDB_KEY = 'vertex_db';
+  const IDB_HIST_NAME = 'psa_vertex_backup_history_v1';
+  const IDB_HIST_STORE = 'operaciones';
+  const IDB_HIST_KEY = 'registros';
   const SQL_JS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2';
   const CAMPOS = [
     'nombre', 'responsable', 'division', 'inicio', 'meta', 'fin', 'estado',
@@ -20,6 +23,8 @@
   let _error = '';
   let _avisoUbicacion = '';
   let _migracion = null;
+  let _restauracionPendiente = null;
+  let _historialCola = Promise.resolve();
 
   function _estado() {
     return {
@@ -314,9 +319,452 @@
 
   async function _leerBinario(handle) {
     try {
-      return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      // Acepta tanto FileSystemFileHandle como File/Blob del selector HTML nativo.
+      const archivo = handle && typeof handle.getFile === 'function'
+        ? await handle.getFile()
+        : handle && typeof handle.arrayBuffer === 'function'
+          ? handle
+          : null;
+      if (!archivo || typeof archivo.arrayBuffer !== 'function') {
+        throw new TypeError('El selector no entregó un archivo legible.');
+      }
+      return new Uint8Array(await archivo.arrayBuffer());
     } catch (e) {
       throw _errorArchivo(e, 'Lectura SQLite', handle);
+    }
+  }
+
+  function _validarBackupBinario(datos) {
+    const fallo = (codigo, mensaje, versionEsquema = null) => ({
+      valido: false, codigo, mensaje, versionEsquema, tamano: datos.length
+    });
+    if (!datos.length) return fallo('archivo_vacio', 'El archivo de respaldo está vacío.');
+    const cabecera = 'SQLite format 3\0';
+    if (datos.length < cabecera.length ||
+        Array.from(cabecera).some((letra, indice) => datos[indice] !== letra.charCodeAt(0))) {
+      return fallo('archivo_invalido', 'El archivo no tiene una cabecera SQLite válida.');
+    }
+    if (datos.length < 100) return fallo('archivo_incompleto', 'El encabezado SQLite está incompleto.');
+    const encabezado = new DataView(datos.buffer, datos.byteOffset, datos.byteLength);
+    const paginaDeclarada = encabezado.getUint16(16);
+    const tamanoPagina = paginaDeclarada === 1 ? 65536 : paginaDeclarada;
+    if (tamanoPagina < 512 || tamanoPagina > 65536 || (tamanoPagina & (tamanoPagina - 1))) {
+      return fallo('archivo_invalido', 'El tamaño de página SQLite no es válido.');
+    }
+    if (datos.length % tamanoPagina) {
+      return fallo('archivo_incompleto', 'El archivo contiene una página SQLite incompleta.');
+    }
+    let candidata;
+    let codigo = 'archivo_invalido';
+    let versionEsquema = null;
+    try {
+      candidata = new _SQL.Database(datos);
+      candidata.run('PRAGMA foreign_keys=ON');
+      codigo = 'integridad';
+      const integridad = candidata.exec('PRAGMA integrity_check');
+      if (!integridad.length || integridad[0].values.length !== 1 || integridad[0].values[0][0] !== 'ok') {
+        return fallo(codigo, 'La copia no supera integrity_check. No es recuperable.');
+      }
+      if (candidata.exec('PRAGMA foreign_key_check').length) {
+        return fallo(codigo, 'La copia contiene relaciones inválidas. No es recuperable.');
+      }
+      codigo = 'esquema_incompatible';
+      versionEsquema = candidata.exec('PRAGMA user_version')[0].values[0][0];
+      if (versionEsquema !== window.PSA.Esquema.VERSION) {
+        return fallo(codigo, 'La versión de esquema no es compatible con la validación actual; no se aplicaron migraciones.', versionEsquema);
+      }
+      window.PSA.Esquema.validar(candidata);
+      const consultas = {};
+      for (const tabla of ['proyectos', 'tableros', 'tarjetas', 'actividad']) {
+        consultas[tabla] = candidata.exec(`SELECT count(*) FROM ${tabla}`)[0].values[0][0];
+      }
+      return { valido: true, codigo: 'valido', mensaje: 'Copia SQLite válida.',
+        versionEsquema, tamano: datos.length, consultas };
+    } catch (e) {
+      return fallo(codigo, 'No se pudo validar la copia: ' + e.message, versionEsquema);
+    } finally {
+      if (candidata) candidata.close();
+    }
+  }
+
+  async function validarBackup(archivo) {
+    if (!_SQL) throw new Error('El motor SQLite no está disponible.');
+    _iniciarOperacion();
+    try {
+      const datos = await _leerBinario(archivo);
+      const resultado = { nombre: archivo.name, ..._validarBackupBinario(datos) };
+      _registrarHistorial({ tipo: 'validacion', archivo: archivo.name, tamano: datos.length,
+        resultado: resultado.valido ? 'valida' : 'invalida', mensaje: resultado.mensaje,
+        versionEsquema: resultado.versionEsquema });
+      return resultado;
+    } catch (e) {
+      _registrarError(e);
+      throw e;
+    } finally {
+      _finalizarOperacion();
+    }
+  }
+
+  async function prepararRestauracion(archivo) {
+    if (!_SQL) throw new Error('El motor SQLite no está disponible.');
+    if (_restauracionPendiente) throw new Error('Ya existe una restauración preparada. Cancele esa operación antes de seleccionar otra copia.');
+    _iniciarOperacion();
+    try {
+      const datos = await _leerBinario(archivo);
+      const validacion = _validarBackupBinario(datos);
+      if (!validacion.valido) {
+        _notificarRestauracion('invalida', { nombre: archivo.name, validacion });
+        return { preparada: false, nombre: archivo.name, validacion };
+      }
+      _restauracionPendiente = {
+        nombre: archivo.name,
+        origen: archivo,
+        datos: datos.slice(),
+        validacion,
+        preparadaEn: new Date().toISOString()
+      };
+      const resultado = {
+        preparada: true,
+        nombre: archivo.name,
+        tamano: datos.length,
+        versionEsquema: validacion.versionEsquema,
+        consultas: validacion.consultas
+      };
+      _notificarRestauracion('preparada', resultado);
+      return resultado;
+    } catch (e) {
+      _registrarError(e);
+      _notificarRestauracion('fallida', { nombre: archivo.name, mensaje: e.message });
+      throw e;
+    } finally {
+      _finalizarOperacion();
+    }
+  }
+
+  function cancelarRestauracion() {
+    if (_ocupado) throw new Error('Espere a que termine la operación en curso.');
+    if (!_restauracionPendiente) return false;
+    const nombre = _restauracionPendiente.nombre;
+    _restauracionPendiente = null;
+    _notificarRestauracion('cancelada', { nombre, mensaje: 'Restauración cancelada. No se modificó ningún archivo.' });
+    return true;
+  }
+
+  function _notificarRestauracion(estado, detalle = {}) {
+    window.dispatchEvent(new CustomEvent('psa:restore-state', { detail: { estado, ...detalle } }));
+    if (['preparada', 'invalida', 'cancelada', 'fallida', 'exitosa'].includes(estado)) {
+      _registrarHistorial({ tipo: 'restauracion', archivo: detalle.nombre || detalle.origen,
+        tamano: detalle.tamano || detalle.validacion?.tamano, resultado: estado,
+        mensaje: detalle.mensaje || detalle.validacion?.mensaje,
+        versionEsquema: detalle.versionEsquema || detalle.validacion?.versionEsquema });
+    }
+  }
+
+  function _nombreRestauracion() {
+    const fecha = new Date();
+    const dos = valor => String(valor).padStart(2, '0');
+    const marca = fecha.getFullYear() + '-' + dos(fecha.getMonth() + 1) + '-' + dos(fecha.getDate()) +
+      '_' + dos(fecha.getHours()) + '-' + dos(fecha.getMinutes()) + '-' + dos(fecha.getSeconds());
+    return 'vertex_restaurada_' + marca + '_' + Math.random().toString(36).slice(2, 8) + '.db';
+  }
+
+  async function restaurarBackup() {
+    if (!_conexion || !_conexion.archivo) throw new Error('Conecte una base de datos antes de restaurar una copia.');
+    if (!_restauracionPendiente) throw new Error('Primero seleccione y valide una copia de seguridad.');
+    const usaSelectorArchivo = typeof window.showSaveFilePicker === 'function';
+    const usaSelectorCarpeta = typeof window.showDirectoryPicker === 'function';
+    if (!usaSelectorArchivo && !usaSelectorCarpeta) {
+      throw new Error('Este navegador no ofrece un selector compatible para crear el archivo restaurado. Utilice una versión actual de Chrome o Edge.');
+    }
+    _iniciarOperacion();
+    let fase = 'selector';
+    try {
+      const nombreSugerido = _nombreRestauracion();
+      let destino;
+      let destinoNombre = '';
+      let carpeta = null;
+
+      // Preferir el selector de archivo: permite elegir nombre y ubicación en
+      // una sola ventana. La invocación ocurre directamente desde el clic.
+      if (usaSelectorArchivo) {
+        const seleccion = window.showSaveFilePicker({
+          id: 'vertex_restore_destination',
+          suggestedName: nombreSugerido,
+          types: [{ description: 'Base de datos SQLite', accept: { 'application/vnd.sqlite3': ['.db'] } }]
+        });
+        destino = await seleccion;
+        destinoNombre = destino.name;
+      } else {
+        // Compatibilidad para navegadores que ofrecen selector de carpeta.
+        const seleccion = window.showDirectoryPicker({ id: 'vertex_restore_folder', mode: 'readwrite' });
+        carpeta = await seleccion;
+        const pendienteNombre = _restauracionPendiente;
+        if (!pendienteNombre) throw new Error('La restauración preparada ya no está disponible. Vuelva a seleccionar el respaldo.');
+        for (let intento = 0; intento < 5; intento++) {
+          const nombre = intento === 0 ? nombreSugerido : _nombreRestauracion();
+          if (nombre === pendienteNombre.nombre) continue;
+          try {
+            await carpeta.getFileHandle(nombre);
+          } catch (error) {
+            if (error.name !== 'NotFoundError') throw error;
+            destinoNombre = nombre;
+            break;
+          }
+        }
+        if (!destinoNombre) throw new Error('No se pudo generar un nombre de destino único. No se escribió la restauración.');
+      }
+
+      const pendiente = _restauracionPendiente;
+      if (!pendiente) throw new Error('La restauración preparada ya no está disponible. Vuelva a seleccionar el respaldo.');
+      fase = 'comprobacion';
+      if (destino && (typeof destino.isSameEntry !== 'function' || typeof _conexion?.archivo?.isSameEntry !== 'function')) {
+        throw new Error('No se pudo comprobar la identidad del destino y de la base activa. No se escribió la restauración.');
+      }
+      if (destino) {
+        const mismoActivo = await destino.isSameEntry(_conexion.archivo);
+        const origenConHandle = typeof pendiente.origen?.isSameEntry === 'function';
+        const mismoOrigen = origenConHandle
+          ? await destino.isSameEntry(pendiente.origen)
+          : destino.name === pendiente.nombre;
+        if (mismoActivo || mismoOrigen) {
+          throw new Error('El destino debe ser un archivo nuevo, distinto de la base activa y del respaldo original.');
+        }
+        // El selector de archivo puede apuntar a un archivo existente. Rechazarlo
+        // para no sobrescribir información.
+        try {
+          await destino.getFile();
+          throw new Error('El archivo de destino ya existe. Elegí un nombre nuevo para evitar sobrescribir información.');
+        } catch (error) {
+          if (error.name !== 'NotFoundError') throw error;
+        }
+      } else if (destinoNombre === pendiente.nombre) {
+        throw new Error('El destino debe tener un nombre diferente al respaldo original.');
+      }
+
+      fase = 'confirmacion';
+      const ubicacion = carpeta ? carpeta.name + ' / ' + destinoNombre : destinoNombre;
+      const confirmar = window.confirm(
+        'Se creará una base restaurada nueva: «' + ubicacion + '». ' +
+        'La base activa y el respaldo original no se modificarán. ¿Continuar?'
+      );
+      if (!confirmar) {
+        _notificarRestauracion('cancelada', { nombre: pendiente.nombre, mensaje: 'Restauración cancelada en la confirmación. No se creó ningún archivo.' });
+        return { ok: false, cancelado: true, preparada: true, fase };
+      }
+
+      fase = 'escritura';
+      if (carpeta) {
+        destino = await carpeta.getFileHandle(destinoNombre, { create: true });
+        if (typeof destino.isSameEntry !== 'function' || typeof _conexion?.archivo?.isSameEntry !== 'function') {
+          throw new Error('No se pudo comprobar la identidad del archivo creado y de la base activa. No se escribió la restauración.');
+        }
+        if (await destino.isSameEntry(_conexion.archivo)) {
+          throw new Error('El destino coincide con la base activa. No se escribió la restauración.');
+        }
+        if (typeof pendiente.origen?.isSameEntry === 'function' && await destino.isSameEntry(pendiente.origen)) {
+          throw new Error('El destino coincide con el respaldo original. No se escribió la restauración.');
+        }
+      }
+      await _escribirArchivo(destino, pendiente.datos);
+      const releido = await _leerBinario(destino);
+      if (!_iguales(releido, pendiente.datos)) {
+        throw new Error('La restauración no pudo confirmarse: el archivo de destino difiere del respaldo. Puede haber quedado un archivo residual.');
+      }
+      const validacion = _validarBackupBinario(releido);
+      if (!validacion.valido) {
+        throw new Error('La restauración no pudo confirmarse: el destino no superó la validación integral. Puede haber quedado un archivo residual. ' + validacion.mensaje);
+      }
+      const resultado = {
+        ok: true,
+        nombre: destino.name,
+        ubicacion,
+        origen: pendiente.nombre,
+        tamano: releido.length,
+        versionEsquema: validacion.versionEsquema,
+        conexionActivaConservada: true
+      };
+      _restauracionPendiente = null;
+      _notificarRestauracion('exitosa', resultado);
+      return resultado;
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        const mensaje = fase === 'selector'
+          ? 'El selector de destino se cerró o fue cancelado (AbortError). El respaldo sigue preparado; no se creó ningún archivo.'
+          : 'La operación de restauración fue interrumpida durante ' + fase + ' (AbortError). El respaldo sigue preparado; no se confirmó ningún archivo.';
+        _notificarRestauracion('cancelada', { nombre: _restauracionPendiente?.nombre || '', mensaje });
+        return { ok: false, cancelado: true, preparada: !!_restauracionPendiente, fase };
+      }
+      const error = new Error('No se pudo completar la restauración durante ' + fase + ': ' + e.message, { cause: e });
+      _registrarError(error);
+      _notificarRestauracion('fallida', { nombre: _restauracionPendiente?.nombre || '', mensaje: error.message });
+      throw error;
+    } finally {
+      _finalizarOperacion();
+    }
+  }
+
+  function _abrirHistorialDB() {
+    return new Promise((resolve, reject) => {
+      const solicitud = indexedDB.open(IDB_HIST_NAME, 1);
+      solicitud.onupgradeneeded = () => {
+        if (!solicitud.result.objectStoreNames.contains(IDB_HIST_STORE)) {
+          solicitud.result.createObjectStore(IDB_HIST_STORE);
+        }
+      };
+      solicitud.onsuccess = () => resolve(solicitud.result);
+      solicitud.onerror = () => reject(solicitud.error || new Error('No se pudo abrir el historial de respaldos.'));
+      solicitud.onblocked = () => reject(new Error('El historial de respaldos está bloqueado por otra conexión.'));
+    });
+  }
+
+  function _registrarHistorial(datos) {
+    const versionApp = typeof document !== 'undefined'
+      ? (document.querySelector('meta[name="app-version"]')?.content || 'no-declarada')
+      : 'entorno-de-pruebas';
+    const registro = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      fecha: new Date().toISOString(),
+      tipo: datos.tipo,
+      archivo: datos.archivo || '',
+      tamano: Number.isFinite(datos.tamano) ? datos.tamano : null,
+      resultado: datos.resultado,
+      mensaje: datos.mensaje || '',
+      versionEsquema: Number.isInteger(datos.versionEsquema) ? datos.versionEsquema : null,
+      versionApp
+    };
+    _historialCola = _historialCola.then(async () => {
+      let idb;
+      try {
+        idb = await _abrirHistorialDB();
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction(IDB_HIST_STORE, 'readwrite');
+          const store = tx.objectStore(IDB_HIST_STORE);
+          const solicitud = store.get(IDB_HIST_KEY);
+          solicitud.onsuccess = () => {
+            const registros = Array.isArray(solicitud.result) ? solicitud.result : [];
+            store.put([registro, ...registros].slice(0, 100), IDB_HIST_KEY);
+          };
+          solicitud.onerror = () => reject(solicitud.error || new Error('No se pudo leer el historial.'));
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error || new Error('No se pudo guardar el historial.'));
+          tx.onabort = () => reject(tx.error || new Error('Se canceló el registro del historial.'));
+        });
+      } finally {
+        if (idb) idb.close();
+      }
+    }).catch(error => {
+      console.warn('[PSA.DB] No se pudo registrar la operación de respaldo:', error);
+    });
+    return _historialCola;
+  }
+
+  async function listarHistorialBackups() {
+    await _historialCola;
+    const idb = await _abrirHistorialDB();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = idb.transaction(IDB_HIST_STORE, 'readonly');
+        const solicitud = tx.objectStore(IDB_HIST_STORE).get(IDB_HIST_KEY);
+        tx.oncomplete = () => {};
+        tx.onerror = () => reject(tx.error || new Error('No se pudo consultar el historial.'));
+        tx.onabort = () => reject(tx.error || new Error('Se canceló la consulta del historial.'));
+        solicitud.onsuccess = () => resolve(Array.isArray(solicitud.result) ? solicitud.result.slice() : []);
+        solicitud.onerror = () => reject(solicitud.error || new Error('No se pudo consultar el historial.'));
+      });
+    } finally {
+      idb.close();
+    }
+  }
+
+  function _notificarBackup(estado, detalle = {}) {
+    window.dispatchEvent(new CustomEvent('psa:backup-state', { detail: { estado, ...detalle } }));
+    if (['exitosa', 'fallida', 'cancelada'].includes(estado)) {
+      _registrarHistorial({ tipo: 'backup', archivo: detalle.nombre, tamano: detalle.tamano,
+        resultado: estado, mensaje: detalle.mensaje, versionEsquema: detalle.versionEsquema });
+    }
+  }
+
+  function _nombreBackup() {
+    const fecha = new Date();
+    const dos = valor => String(valor).padStart(2, '0');
+    return 'VERTEX_backup_' + fecha.getFullYear() + '-' + dos(fecha.getMonth() + 1) + '-' + dos(fecha.getDate()) +
+      '_' + dos(fecha.getHours()) + '-' + dos(fecha.getMinutes()) + '-' + dos(fecha.getSeconds()) + '.db';
+  }
+
+  async function _seleccionarDestinoBackup(enCarpeta) {
+    const nombre = _nombreBackup();
+    let carpeta;
+    let archivo;
+    try {
+      if (enCarpeta) {
+        if (typeof window.showDirectoryPicker !== 'function') throw new Error('La selección de carpetas no está disponible.');
+        carpeta = await window.showDirectoryPicker({ id: 'vertex_backup_carpeta', mode: 'readwrite' });
+      } else {
+        if (typeof window.showSaveFilePicker !== 'function') throw new Error('La selección del destino de respaldo no está disponible.');
+        archivo = await window.showSaveFilePicker({
+          id: 'vertex_backup', suggestedName: nombre,
+          types: [{ description: 'Copia de seguridad SQLite', accept: { 'application/octet-stream': ['.db'] } }]
+        });
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') return null;
+      throw e;
+    }
+    if (carpeta) {
+      try {
+        await carpeta.getFileHandle(nombre);
+        throw new Error('Ya existe un respaldo con ese nombre. No se sobrescribió; reintente o elija otra ubicación.');
+      } catch (e) {
+        if (e.name !== 'NotFoundError') throw e;
+      }
+      archivo = await carpeta.getFileHandle(nombre, { create: true });
+    }
+    return { archivo, ubicacion: (carpeta ? carpeta.name + ' / ' : '') + archivo.name };
+  }
+
+  async function _escribirVerificado(destino, datos) {
+    await _escribirArchivo(destino, datos);
+    const leido = await _leerBinario(destino);
+    if (!_iguales(leido, datos)) {
+      throw new Error('No se pudo verificar el respaldo. El destino no coincide con los bytes esperados.');
+    }
+    return leido;
+  }
+
+  async function crearBackup({ enCarpeta = false } = {}) {
+    if (!_db || !_conexion) throw new Error('Conecte una base de datos antes de crear una copia de seguridad.');
+    if (_migracion) throw new Error('Confirme o cancele la migración pendiente antes de crear una copia.');
+    _iniciarOperacion();
+    _notificarBackup('en_curso', { mensaje: 'Creando copia de seguridad del estado confirmado.' });
+    try {
+      const destino = await _seleccionarDestinoBackup(enCarpeta);
+      if (!destino) {
+        _notificarBackup('cancelada', { mensaje: 'Copia de seguridad cancelada. No se escribieron datos.' });
+        return { ok: false, cancelado: true };
+      }
+      if (destino.archivo === _conexion.archivo) throw new Error('El respaldo debe ser distinto del archivo activo.');
+      if (typeof destino.archivo.isSameEntry !== 'function') {
+        throw new Error('No se pudo verificar la identidad del destino. No se escribió el respaldo.');
+      }
+      if (await destino.archivo.isSameEntry(_conexion.archivo)) throw new Error('El respaldo debe ser distinto del archivo activo.');
+      if ((await _leerBinario(destino.archivo)).length) throw new Error('El destino contiene datos. No se sobrescribió.');
+      const datos = _exportar(_db);
+      const origen = _validarBackupBinario(datos);
+      if (!origen.valido) throw new Error(origen.mensaje);
+      const leido = await _escribirVerificado(destino.archivo, datos);
+      const validacion = _validarBackupBinario(leido);
+      if (!validacion.valido) throw new Error(validacion.mensaje);
+      const resultado = { ok: true, nombre: destino.archivo.name, ubicacion: destino.ubicacion,
+        tamano: leido.length, versionEsquema: validacion.versionEsquema };
+      _notificarBackup('exitosa', { ...resultado, mensaje: 'Copia de seguridad escrita, cerrada y validada.' });
+      return resultado;
+    } catch (e) {
+      const error = new Error('El respaldo no pudo confirmarse: ' + e.message, { cause: e });
+      _registrarError(error);
+      _notificarBackup('fallida', { mensaje: error.message });
+      throw error;
+    } finally {
+      _finalizarOperacion();
     }
   }
 
@@ -340,10 +788,7 @@
     if ((await _leerBinario(destino)).length) {
       throw new Error('El archivo de respaldo no está vacío. No se sobrescribió.');
     }
-    await _escribirArchivo(destino, solicitud.original);
-    if (!_iguales(await _leerBinario(destino), solicitud.original)) {
-      throw new Error('No se pudo verificar el respaldo. La base original no se modificó.');
-    }
+    await _escribirVerificado(destino, solicitud.original);
     return destino.name;
   }
 
@@ -493,9 +938,12 @@
   window.PSA = window.PSA || {};
   window.PSA.DB = {
     init, configurarCarpeta, conectarArchivo, solicitarPermiso, migrarConexion, cancelarMigracion,
-    consultar, transaccion,
+    consultar, transaccion, validarBackup, crearBackup, prepararRestauracion, cancelarRestauracion, restaurarBackup, listarHistorialBackups,
     getProyectos, saveProyecto, deleteProyecto,
-    exportarDB() { return _db ? _exportar(_db) : null; },
+    exportarDB() {
+      if (_ocupado) throw new Error('Hay una operación de base de datos en curso. Espere antes de exportar.');
+      return _db ? _exportar(_db) : null;
+    },
     get estado() { return _estado(); },
     get useSQLite() { return !!_SQL; },
     get tieneArchivo() { return !!_conexion; },

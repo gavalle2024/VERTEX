@@ -25,7 +25,7 @@ window.prepararPruebaTableros = async function (datos = []) {
               put(value, key) { store.set(key, value); queueMicrotask(() => tx.oncomplete()); return {}; },
               get(key) {
                 const result = { result: store.get(key) };
-                queueMicrotask(() => tx.oncomplete());
+                queueMicrotask(() => { if (result.onsuccess) result.onsuccess(); if (tx.oncomplete) tx.oncomplete(); });
                 return result;
               }
             }) };
@@ -40,6 +40,7 @@ window.prepararPruebaTableros = async function (datos = []) {
   const file = {
     kind: 'file', name: 'vertex.db', datos: new Uint8Array(datos), fallo: false, falloCierre: false,
     permiso: 'granted', abortos: 0, escrituras: 0,
+    async isSameEntry(otro) { return this === otro; },
     async queryPermission() { return this.permiso; },
     async requestPermission() { return this.permiso; },
     async getFile() {
@@ -162,6 +163,78 @@ window.probarPersistenciaA3 = async function () {
   return { resultados, archivo: Array.from(file.datos), proyectoId: proyecto.id };
 };
 
+window.probarBackupsB1B2 = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  await prepararPruebaTableros();
+  document.getElementById('p-nombre').value = 'Proyecto de respaldo sintético';
+  document.getElementById('p-responsable').value = 'Responsable de prueba';
+  document.getElementById('p-inicio').value = '2026-11-07';
+  await PSA.Proyectos.guardarProyecto();
+  const proyecto = PSA.DB.getProyectos()[0];
+  PSA.Proyectos.editarProyecto(proyecto.id);
+  document.getElementById('p-nombre').value = 'Edición pendiente no incluida';
+  const file = window.__archivoPruebaTableros;
+  const bytes = file.datos.slice();
+  const ubicacion = PSA.DB.estado.ubicacion;
+  const originalSelector = window.showSaveFilePicker;
+  const estados = [];
+  const registrar = event => estados.push(event.detail.estado);
+  window.addEventListener('psa:backup-state', registrar);
+  const destino = { ...file, name: 'VERTEX_backup_browser_sintetico.db', datos: new Uint8Array(), escrituras: 0,
+    async isSameEntry(otro) { return this === otro; } };
+  window.showSaveFilePicker = async () => destino;
+  const intacta = () => file.datos.length === bytes.length && file.datos.every((valor, indice) => valor === bytes[indice]);
+  try {
+    const resultado = await PSA.DB.crearBackup();
+    check(resultado.ok && resultado.versionEsquema === 3 && resultado.tamano === bytes.length,
+      'B1 browser: respaldo escrito, cerrado y validado');
+    check(destino.datos.length === bytes.length && destino.datos.every((valor, indice) => valor === bytes[indice]),
+      'B1 browser: bytes corresponden al estado confirmado');
+    check(intacta() && PSA.DB.estado.ubicacion === ubicacion && PSA.DB.getProyectos()[0].id === proyecto.id,
+      'B1 browser: datos y conexión activa permanecen intactos');
+    check(PSA.Proyectos.editandoId === proyecto.id && document.getElementById('p-nombre').value === 'Edición pendiente no incluida',
+      'B1 browser: respaldo no descarta ni incluye el formulario pendiente');
+    check(estados[0] === 'en_curso' && estados.at(-1) === 'exitosa',
+      'B1 browser: estados de inicio y finalización confirmada');
+    const validacion = await PSA.DB.validarBackup(destino);
+    check(validacion.valido && validacion.consultas.proyectos === 1 && destino.escrituras === 1,
+      'B2 browser: validación independiente no escribe el origen');
+    for (const [datos, codigo] of [[new Uint8Array(), 'archivo_vacio'], [new Uint8Array([1, 2, 3]), 'archivo_invalido'],
+      [bytes.slice(0, 80), 'archivo_incompleto']]) {
+      const invalida = { ...destino, datos, escrituras: 0 };
+      const informe = await PSA.DB.validarBackup(invalida);
+      check(!informe.valido && informe.codigo === codigo && invalida.escrituras === 0,
+        'B2 browser: rechaza ' + codigo + ' sin modificar el archivo');
+    }
+    window.showSaveFilePicker = async () => file;
+    let fallo;
+    try { await PSA.DB.crearBackup(); } catch (error) { fallo = error; }
+    check(!!fallo && intacta(), 'B1 browser: nunca respalda sobre el archivo activo');
+    const fallida = { ...destino, datos: new Uint8Array(), falloCierre: true, escrituras: 0 };
+    window.showSaveFilePicker = async () => fallida;
+    fallo = null;
+    try { await PSA.DB.crearBackup(); } catch (error) { fallo = error; }
+    check(!!fallo && estados.at(-1) === 'fallida' && fallida.escrituras === 0 && intacta(),
+      'B1 browser: fallo de cierre no confirma éxito');
+    window.showSaveFilePicker = async () => { throw new DOMException('Cancelación sintética', 'AbortError'); };
+    check((await PSA.DB.crearBackup()).cancelado && estados.at(-1) === 'cancelada' && intacta(),
+      'B1 browser: cancelar no escribe ni cambia la conexión');
+    window.showSaveFilePicker = async () => ({ ...destino, datos: new Uint8Array(), escrituras: 0 });
+    check((await PSA.DB.crearBackup()).ok && !PSA.DB.ocupado,
+      'B1 browser: recuperación después de error permite otro respaldo');
+    check(PSA.Proyectos.editandoId === proyecto.id && document.querySelectorAll('[style]').length === 0,
+      'B1/B2 browser: formulario y seguridad visual conservados');
+  } finally {
+    window.showSaveFilePicker = originalSelector;
+    window.removeEventListener('psa:backup-state', registrar);
+  }
+  return { resultados, archivo: Array.from(destino.datos), proyectoId: proyecto.id };
+};
+
 window.probarInterfazTableros = async function () {
   const resultados = [];
   const check = (valor, nombre) => {
@@ -238,6 +311,28 @@ window.probarInterfazTableros = async function () {
   valor('nombre', 'Lista renombrada');
   await guardar();
   check(PSA.Trabajo.getListas(tablero.id).find(l => l.id === lista.id).nombre === 'Lista renombrada', 'Renombrar lista');
+  const menuEtapa = document.querySelector(`.kanban-list[data-list-id="${CSS.escape(lista.id)}"] .work-list-menu`);
+  check(!!menuEtapa && !!menuEtapa.querySelector('[data-accion="lista"]') &&
+    !!menuEtapa.querySelector('[data-accion="lista-anterior"]') &&
+    !!menuEtapa.querySelector('[data-accion="seleccionar-etapa"]') &&
+    !!menuEtapa.querySelector('[data-accion="archivo-lista"]'),
+  'Etapas compactas: acciones administrativas agrupadas en menú contextual');
+  check(!document.querySelector('.kanban-list > .actions [data-accion="lista"]') &&
+    !!document.querySelector('.kanban-list-footer [data-accion="nueva-tarjeta"]'),
+  'Etapas compactas: se retiran controles permanentes y se conserva crear tarjeta');
+  const cabeceraEtapa = document.querySelector('.kanban-list[data-list-id="' + lista.id + '"] .kanban-list-heading');
+  check(getComputedStyle(cabeceraEtapa.querySelector('h3')).color === 'rgb(255, 255, 255)',
+    'Cabecera de etapa: nombre blanco y legible');
+  check(cabeceraEtapa.querySelector('.work-meta').textContent.trim() === '0 tarjetas visibles',
+    'Cabecera de etapa: contador cero sin repetir el nombre');
+  menuEtapa.querySelector('summary').click();
+  check(menuEtapa.open, 'Etapas compactas: abrir menú contextual');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check(!menuEtapa.open && document.activeElement === menuEtapa.querySelector('summary'),
+    'Etapas compactas: Escape cierra el menú y devuelve el foco');
+  menuEtapa.querySelector('summary').click();
+  document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  check(!menuEtapa.open, 'Etapas compactas: clic externo cierra el menú');
   click(accion('lista-anterior', lista.id)); await esperar();
   check(PSA.Trabajo.getListas(tablero.id)[4].id === lista.id, 'Reordenar listas con persistencia');
 
@@ -261,8 +356,37 @@ window.probarInterfazTableros = async function () {
   await guardar();
   const tarjeta = PSA.Trabajo.getTarjetas()[0];
   check(tarjeta.lista_id === lista.id && tarjeta.responsable_id === responsable, 'Asociaciones correctas de tarjeta');
+  check(cabeceraEtapa.querySelector('.work-meta').textContent.trim() === '1 tarjeta visible',
+    'Cabecera de etapa: contador singular actualizado al crear tarjeta');
   check(!$('#tablero-columnas script') && !window.__inyeccion, 'Título de tarjeta escapado');
   check(!!$('.work-priority-high') && !!$('.work-overdue'), 'Indicadores de prioridad y vencimiento');
+  const tarjetaCompacta = $('.work-card[data-card-id="' + tarjeta.id + '"]');
+  check(!!tarjetaCompacta.querySelector('.work-card-menu > summary') &&
+    !tarjetaCompacta.querySelector('.work-card-menu').open,
+    'Tarjeta compacta: menú contextual cerrado inicialmente');
+  check(tarjetaCompacta.querySelector('.work-card-primary').textContent.includes('Crítica') &&
+    tarjetaCompacta.querySelector('.work-card-primary').textContent.includes('Vencida'),
+    'Tarjeta compacta: prioridad y vencimiento permanecen visibles');
+  check(!tarjetaCompacta.querySelector('.work-card-move') &&
+    tarjetaCompacta.querySelector('.work-card-menu-panel [data-accion="historial-tarjeta"]') &&
+    tarjetaCompacta.querySelector('.work-card-menu-panel [data-accion="archivo-tarjeta"]'),
+    'Tarjeta compacta: acciones secundarias agrupadas en menú');
+  check(tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
+    'Tarjeta compacta: selector de destino oculto inicialmente');
+  tarjetaCompacta.querySelector('.work-card-menu > summary').click();
+  check(!!tarjetaCompacta.querySelector('.work-card-menu').open,
+    'Tarjeta compacta: menú contextual abre con ratón');
+  tarjetaCompacta.querySelector('[data-accion="mostrar-destino"]').click();
+  check(!tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
+    'Tarjeta compacta: selector específico aparece bajo demanda');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check(!tarjetaCompacta.querySelector('.work-card-menu').open &&
+    tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
+    'Tarjeta compacta: Escape cierra menú y selector');
+  tarjetaCompacta.querySelector('.work-card-menu > summary').click();
+  document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  check(!tarjetaCompacta.querySelector('.work-card-menu').open,
+    'Tarjeta compacta: clic fuera cierra el menú');
   click(accion('lista', lista.id));
   check($('#trabajo-form [name="categoria"]').disabled, 'Categoría protegida cuando hay tarjetas');
   cancelar();
@@ -1487,5 +1611,133 @@ window.probarFase7Dashboard = async function () {
   check(document.querySelector('#dash-crear-tarjeta').disabled === false,
     'Las acciones rápidas quedan disponibles con tablero y etapa activos');
 
+  return { resultados };
+};
+
+
+window.probarAdministracionDatosB3B4 = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  await prepararPruebaTableros();
+  const activo = window.__archivoPruebaTableros;
+  document.getElementById('p-nombre').value = 'Proyecto sintético restauración';
+  document.getElementById('p-responsable').value = 'Responsable de prueba';
+  document.getElementById('p-inicio').value = '2026-11-07';
+  await PSA.Proyectos.guardarProyecto();
+  const bytesActivos = activo.datos.slice();
+  const fuente = {
+    kind: 'file', name: 'respaldo-browser-sintetico.db', datos: bytesActivos.slice(), escrituras: 0,
+    async isSameEntry(otro) { return this === otro; },
+    async getFile() { const copia = this.datos.slice(); return { arrayBuffer: async () => copia.buffer }; }
+  };
+  const preparada = await PSA.DB.prepararRestauracion(fuente);
+  check(preparada.preparada && preparada.versionEsquema === 3,
+    'B3 browser: respaldo sintético se valida y prepara');
+  let destino = null;
+  const selectorAnterior = window.showDirectoryPicker;
+  window.showDirectoryPicker = async () => ({
+    kind: 'directory', name: 'Restauraciones sintéticas',
+    async getFileHandle(nombre, opciones) {
+      if (!opciones?.create) throw new DOMException('No existe', 'NotFoundError');
+      destino = {
+        kind: 'file', name: nombre, datos: new Uint8Array(), escrituras: 0,
+        async isSameEntry(otro) { return this === otro; },
+        async getFile() { const copia = this.datos.slice(); return { arrayBuffer: async () => copia.buffer }; },
+        async createWritable() {
+          const archivo = this;
+          let temporal;
+          return {
+            async write(data) { temporal = data.slice(); },
+            async close() { archivo.datos = temporal; archivo.escrituras++; },
+            async abort() { temporal = undefined; }
+          };
+        }
+      };
+      return destino;
+    }
+  });
+  try {
+    const restaurada = await PSA.DB.restaurarBackup();
+    check(restaurada.ok && restaurada.conexionActivaConservada && destino?.escrituras === 1,
+      'B3 browser: restauración confirmada en archivo nuevo');
+    check(activo.datos.length === bytesActivos.length && activo.datos.every((v, i) => v === bytesActivos[i]) &&
+      fuente.datos.every((v, i) => v === bytesActivos[i]),
+    'B3 browser: base activa y respaldo fuente permanecen intactos');
+    check(destino.datos.length === bytesActivos.length && destino.datos.every((v, i) => v === bytesActivos[i]),
+      'B3 browser: destino restaurado coincide byte a byte');
+    const historial = await PSA.DB.listarHistorialBackups();
+    check(historial.some(item => item.tipo === 'restauracion' && item.resultado === 'preparada') &&
+      historial.some(item => item.tipo === 'restauracion' && item.resultado === 'exitosa'),
+    'B4 browser: historial registra preparación y restauración sin contenido funcional');
+    check(document.querySelectorAll('#v-datos [style], #v-datos [onclick], #v-datos [onchange]').length === 0,
+      'B4 browser: interfaz de administración no incorpora estilos ni handlers inline');
+
+    // Simula el flujo de selección HTML con un File real, sin abrir un diálogo del SO.
+    const inputRespaldo = document.getElementById('datos-restore-file');
+    const botonPreparar = document.querySelector('[data-action="restore-prepare"]');
+    const botonAplicar = document.querySelector('[data-action="restore-apply"]');
+    check(!!inputRespaldo && inputRespaldo.type === 'file',
+      'B3 browser: existe el selector HTML nativo para archivos de respaldo');
+    const clickOriginal = inputRespaldo.click;
+    try {
+      inputRespaldo.click = () => {};
+      const archivoSeleccionado = new File([PSA.DB.exportarDB()], 'respaldo-selector-html.db', { type: 'application/octet-stream' });
+      const transferencia = new DataTransfer();
+      transferencia.items.add(archivoSeleccionado);
+      Object.defineProperty(inputRespaldo, 'files', { configurable: true, value: transferencia.files });
+      botonPreparar.click();
+      inputRespaldo.dispatchEvent(new Event('change', { bubbles: true }));
+      for (let espera = 0; espera < 100 && botonAplicar.disabled; espera++) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      check(!botonAplicar.disabled && document.getElementById('datos-restore-detail').textContent.includes(archivoSeleccionado.name),
+        'B3 browser: File seleccionado por input HTML se lee, valida y prepara');
+      PSA.cancelarRestauracionUI();
+    } finally {
+      inputRespaldo.click = clickOriginal;
+      try { delete inputRespaldo.files; } catch (_) {}
+    }
+  } finally {
+    window.showDirectoryPicker = selectorAnterior;
+  }
+  return { resultados, archivo: Array.from(destino?.datos || []) };
+};
+
+
+window.probarTemaVisualVertex = function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const boton = document.getElementById('btn-theme-toggle');
+  check(!!boton, 'Tema: existe el control accesible en la cabecera');
+  check(!Array.from(document.querySelectorAll('.badge')).some(el => /PSA\s*[·-]\s*AVSEC/i.test(el.textContent)),
+    'Tema: etiqueta PSA-AVSEC eliminada de la interfaz activa');
+  const anterior = document.documentElement.dataset.theme;
+  let preferenciaAnterior = null;
+  try { preferenciaAnterior = localStorage.getItem('vertex-theme'); } catch (_) {}
+  try {
+    PSA.Tema.aplicar('light');
+    check(document.documentElement.dataset.theme === 'light' && localStorage.getItem('vertex-theme') === 'light',
+      'Tema: aplica y persiste el modo claro');
+    PSA.Tema.alternar();
+    check(document.documentElement.dataset.theme === 'dark' && boton.getAttribute('aria-pressed') === 'true',
+      'Tema: alterna al modo oscuro y expone el estado accesible');
+    check(getComputedStyle(document.body).backgroundColor !== '', 'Tema: el documento conserva estilo calculado');
+    PSA.Tema.alternar();
+    check(document.documentElement.dataset.theme === 'light' && boton.getAttribute('aria-pressed') === 'false',
+      'Tema: permite volver al modo claro');
+  } finally {
+    if (anterior === 'dark' || anterior === 'light') PSA.Tema.aplicar(anterior, false);
+    else PSA.Tema.aplicar('light', false);
+    try {
+      if (preferenciaAnterior === null) localStorage.removeItem('vertex-theme');
+      else localStorage.setItem('vertex-theme', preferenciaAnterior);
+    } catch (_) {}
+  }
   return { resultados };
 };

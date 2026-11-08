@@ -6,6 +6,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-11-07
 
+### Creación y validación de copias B1/B2
+- `PSA.DB.crearBackup({enCarpeta})` guarda el estado confirmado en un destino elegido, independiente y vacío. No cambia conexión/handle ni descarta formularios. Confirma solo tras write, close, relectura, comparación binaria y validación integral; expone estados con `psa:backup-state`.
+- `PSA.DB.validarBackup(handle)` usa una instancia sql.js independiente con integrity_check, FK, esquema 3, tablas/índices/columnas esperados y consultas esenciales. Diagnostica vacío, cabecera inválida, truncamiento, integridad y compatibilidad sin modificar ni migrar el origen.
+- Se reutiliza la escritura verificada de respaldos previos a migraciones. Exportar mientras hay una operación ocupada se rechaza para impedir concurrencia. No hay nuevas dependencias ni cambios del esquema SQLite.
+- Matriz específica: B1 **17 aprobadas**, B2 **14 aprobadas**, incluido respaldo y reapertura con archivos temporales físicos y datos sintéticos. Browser B1/B2 **14**, regresión funcional **164**, A3 **27**, CSSOM **31** y seguridad **7** comprobaciones aprobadas; sin violaciones CSP ni excepciones no controladas. Los permisos y selectores son mocks; la prueba física Node no certifica FSA nativa.
+- La comparación entre Uint8Array de Node y VM del test temporal se corrigió a comparación de bytes con Buffer; el resultado final pasó. No se abrió/leyó/modificó la base habitual ni sus auxiliares, y no se hicieron operaciones Git de escritura o remotas.
+- B3 y B4 no se implementan todavía: esperan revisión. Los destinos fallidos se conservan, sin eliminación, reparación ni restauración automática; close ambiguo/daño físico/concurrencia externa siguen fuera de las garantías.
+
 ### Corrección de CSSOM restringido en Tableros
 - `_claseColor()` accedía a `#app-styles.sheet.cssRules` sin controlar SecurityError. La hoja era `css/styles.css`, no una hoja externa obtenida recorriendo `document.styleSheets`; en ciertos contextos file:// una hoja puede cargarse y aun así restringir su CSSOM. El fallo de color impedía terminar el renderizado del catálogo y mostraba error de consulta.
 - Los hex validados se insertan ahora en una hoja `CSSStyleSheet` construida y adoptada por el documento, con referencia privada y una regla por color. No se consulta ni modifica CSSOM de hojas importadas. Fallos de construcción/inserción quedan controlados: se conserva el estilo predeterminado y el render continúa.
@@ -401,3 +409,75 @@ Versión inicial monolítica: `gestion_proyectos_psa.html`.
 - Todo el código en un único archivo HTML de ~450 líneas.
 - Sin validación de seguridad contra XSS.
 - Sin documentación técnica.
+
+### Bloque B3 — Restauración segura
+
+- Se incorporó `PSA.DB.prepararRestauracion(handle)` para validar el respaldo y conservar en memoria los bytes validados sin modificar el origen.
+- Se incorporó `PSA.DB.restaurarBackup()` para escribir la restauración exclusivamente como archivo nuevo en una carpeta elegida por el usuario. El destino se relee, compara byte a byte y valida integralmente.
+- Se incorporó `PSA.DB.cancelarRestauracion()` y el evento `psa:restore-state`.
+- La conexión activa, el handle, los formularios y el respaldo original permanecen sin cambios. No se ejecutan migraciones ni se reemplaza automáticamente la base activa.
+- Se agregaron cuatro pruebas Node B3 para éxito, archivo inválido, cancelación y error de escritura.
+- Pendiente B4: interfaz de Administración de datos e historial independiente. Pendientes manuales B3: permisos, selector y escritura reales de File System Access API.
+
+
+### Bloque B4 — Administración de datos e historial
+
+- Se agregó la pestaña **Administración de datos** con acciones para crear y validar copias, preparar y ejecutar restauraciones, y consultar el historial.
+- Se agregó historial de hasta 100 operaciones en una base IndexedDB independiente, sin contenido de proyectos.
+- Se integraron estados accesibles, confirmación explícita y controles que evitan acciones simultáneas.
+- La visualización de registros utiliza `textContent`; no se incorporaron handlers ni estilos inline y se conserva la CSP.
+- Pendiente validación manual de los selectores y permisos reales en Chromium/Edge.
+
+
+## Corrección de selección de respaldos
+
+- Los selectores de creación, validación y restauración comparten el ID `vertex_backup` para reutilizar la última carpeta elegida en Chromium/Edge.
+- Se agregaron mensajes que orientan al usuario a buscar `VERTEX_backup_*.db` en la carpeta donde creó el respaldo.
+
+
+## Corrección de selector de restauración e historial
+
+- Se eliminó el filtro por extensión del selector de respaldos para evitar que el navegador o el sistema oculten archivos SQLite por asociaciones MIME/extensión; la validación del contenido sigue siendo obligatoria mediante B2.
+- Se separó la cancelación del diálogo de selección de los errores ocurridos después de seleccionar un archivo. La interfaz ahora identifica el archivo elegido y muestra errores de lectura/validación sin clasificarlos como cancelación del usuario.
+- El botón **Actualizar historial** ahora informa el estado de consulta, deshabilita temporalmente el botón, muestra la cantidad de registros y la hora de actualización, y presenta los errores de consulta de forma visible.
+
+
+### Selección de respaldos para validación y restauración
+
+La interfaz utiliza el selector HTML nativo (`input[type=file]`) para recibir un objeto `File` y leerlo mediante `arrayBuffer()`. La validación SQLite se realiza por contenido, no por extensión. Este flujo evita depender de que `showOpenFilePicker()` entregue un `FileSystemFileHandle` en todos los entornos Chromium. La restauración sigue requiriendo `showDirectoryPicker()` para crear un archivo nuevo; no se otorgan ni simulan permisos persistentes de escritura sobre el archivo de origen.
+
+
+## Rediseño compacto de tarjetas Kanban
+
+- Se redujo el espacio permanente de cada tarjeta: título, prioridad, responsables y vencimiento permanecen visibles.
+- La fecha de inicio, etiquetas y estados secundarios pasan a «Más información».
+- Las acciones secundarias se agrupan en un menú contextual accesible con teclado, clic y toque; se cierra al hacer clic fuera o pulsar Escape.
+- El selector de etapa específica aparece únicamente cuando se solicita desde el menú.
+- Se conserva el control dedicado de arrastre y la selección individual/múltiple.
+- Se agregaron comprobaciones browser para estructura compacta, acciones agrupadas, selector bajo demanda y cierre del menú.
+
+
+## Rediseño compacto de etapas Kanban
+
+- Se compactó la cabecera de cada etapa para mantener visibles el nombre, la cantidad de tarjetas visibles y la categoría.
+- Las acciones de edición, ordenamiento, selección de todas las tarjetas visibles y archivado/reactivación se agruparon en un menú `⋮`.
+- El botón `+ Crear tarjeta` permanece disponible al pie de cada columna; los estados vacíos utilizan el mensaje breve «Sin tarjetas».
+- El menú admite cierre con Escape y clic externo, y devuelve el foco al control de apertura al cerrarse con Escape.
+- El panel se despliega dentro del flujo de la cabecera para evitar recortes por el área horizontal desplazable del Kanban.
+- Se añadieron comprobaciones browser para el menú, su cierre, las acciones agrupadas y la permanencia del botón de creación.
+
+
+## Corrección visual de cabeceras Kanban
+
+- Los nombres de las etapas utilizan texto blanco para mantener el contraste sobre sus cabeceras oscuras.
+- El contador muestra únicamente la cantidad de tarjetas visibles, con singular y plural correctos, sin repetir el nombre o la categoría de la etapa.
+- Se agregaron regresiones browser para contraste, contador en cero y contador singular tras crear una tarjeta.
+
+
+## Personalización visual — tema claro/oscuro
+
+- Se retiró la etiqueta PSA · AVSEC de la cabecera activa.
+- Se incorporó un control accesible para alternar modo claro y oscuro.
+- La preferencia se persiste en `localStorage` (`vertex-theme`), sin modificar SQLite.
+- Se añadieron variables y reglas CSS para superficies, textos, controles, tablas, Kanban, calendario, diálogos y administración de datos.
+- El tema predeterminado es claro cuando no existe una preferencia guardada.

@@ -24,7 +24,7 @@
       <span id="db-detail" aria-live="polite"></span>
     </div>
   </div>
-  <div class="badge">PSA · AVSEC</div>
+  <button id="btn-theme-toggle" class="theme-toggle" type="button" data-action="theme-toggle" aria-pressed="false" aria-label="Activar modo oscuro"><span class="theme-toggle-icon" aria-hidden="true">🌙</span><span class="theme-toggle-label">Modo oscuro</span></button>
 </header>
 
 <!-- ══════════════════════════════════════════
@@ -38,6 +38,7 @@
     <button id="tab-tableros" role="tab" aria-selected="false" aria-controls="v-tableros" tabindex="-1" data-view="v-tableros">Tableros</button>
     <button id="tab-calendario" role="tab" aria-selected="false" aria-controls="v-calendario" tabindex="-1" data-view="v-calendario">Calendario</button>
     <button id="tab-actividad" role="tab" aria-selected="false" aria-controls="v-actividad" tabindex="-1" data-view="v-actividad">Actividad</button>
+  <button id="tab-datos" role="tab" aria-selected="false" aria-controls="v-datos" tabindex="-1" data-view="v-datos">Administración de datos</button>
 </nav>
 
 <!-- ══════════════════════════════════════════
@@ -493,6 +494,44 @@
       <p id="actividad-error" class="form-error" role="alert"></p>
       <ol id="actividad-lista" class="activity-list"></ol>
       <button type="button" class="btn btn-ghost hidden" id="actividad-mas">Cargar actividad anterior</button>
+    </div>
+  </section>
+
+  <section id="v-datos" class="view" role="tabpanel" aria-labelledby="tab-datos" tabindex="0">
+    <div class="card">
+      <h2>Administración de datos</h2>
+      <p class="work-meta">Copias independientes y restauración segura. La restauración crea un archivo nuevo; nunca reemplaza la base activa.</p>
+      <section class="data-admin-block" aria-labelledby="datos-backup-titulo">
+        <h3 id="datos-backup-titulo">Copias de seguridad</h3>
+        <p>Crear una copia del estado confirmado de SQLite o validar una copia existente antes de restaurarla.</p>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-action="backup-create">Crear copia de seguridad</button>
+          <button type="button" class="btn btn-ghost" data-action="backup-validate">Validar copia existente</button>
+        </div>
+      </section>
+      <section class="data-admin-block" aria-labelledby="datos-restore-titulo">
+        <h3 id="datos-restore-titulo">Restauración segura</h3>
+        <p>Seleccione y valide un respaldo. Después podrá elegir el nombre y la ubicación de un archivo restaurado nuevo. La conexión actual no cambiará.</p>
+        <div class="actions">
+          <button type="button" class="btn btn-ghost" data-action="restore-prepare">Seleccionar y validar respaldo</button>
+          <input id="datos-restore-file" type="file" hidden aria-label="Seleccionar archivo de respaldo SQLite">
+          <button type="button" class="btn btn-primary" data-action="restore-apply" disabled>Crear archivo restaurado</button>
+          <button type="button" class="btn btn-ghost" data-action="restore-cancel" disabled>Cancelar preparación</button>
+        </div>
+        <p id="datos-restore-detail" class="work-meta" role="status" aria-live="polite">No hay una restauración preparada.</p>
+      </section>
+      <p id="datos-operacion-status" class="dashboard-status" role="status" aria-live="polite"></p>
+      <p id="datos-operacion-error" class="form-error" role="alert"></p>
+    </div>
+    <div class="card">
+      <div class="data-history-heading">
+        <h2>Historial de operaciones</h2>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="backup-history-refresh">Actualizar historial</button>
+      </div>
+      <p class="work-meta">Se conservan hasta 100 registros locales de copias, validaciones y restauraciones. No se almacena el contenido de los proyectos.</p>
+      <p id="datos-historial-estado" class="work-meta" role="status" aria-live="polite">El historial se consulta desde el almacenamiento local de este navegador.</p>
+      <ol id="datos-historial" class="data-history-list"></ol>
+      <p id="datos-historial-vacio" class="work-meta">Todavía no hay operaciones registradas.</p>
     </div>
   </section>
 </main>
