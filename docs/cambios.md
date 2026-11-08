@@ -6,6 +6,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-11-07
 
+### Corrección de CSSOM restringido en Tableros
+- `_claseColor()` accedía a `#app-styles.sheet.cssRules` sin controlar SecurityError. La hoja era `css/styles.css`, no una hoja externa obtenida recorriendo `document.styleSheets`; en ciertos contextos file:// una hoja puede cargarse y aun así restringir su CSSOM. El fallo de color impedía terminar el renderizado del catálogo y mostraba error de consulta.
+- Los hex validados se insertan ahora en una hoja `CSSStyleSheet` construida y adoptada por el documento, con referencia privada y una regla por color. No se consulta ni modifica CSSOM de hojas importadas. Fallos de construcción/inserción quedan controlados: se conserva el estilo predeterminado y el render continúa.
+- CSP intacta, sin atributos style inline ni nuevas dependencias. Persistencia, esquema SQLite y cambios de A3 preservados.
+- `probarColoresCSSOM()` aprobó 31 comprobaciones, incluidas fase 5 (18), seguridad (7) y seis casos específicos: hoja importada inaccesible, render, contraste, fallback, restauración del mock y reintento. En este Chromium la hoja importada era accesible nativamente; la restricción que provoca el mensaje reportado se reprodujo con un mock, sin afirmar validación de la configuración exacta del usuario.
+
 ### Robustez de persistencia y archivos (A3)
 - Retomados los cambios previos en DB y pruebas sin revertirlos. El fallo de memoria del test vacío ocurría al comparar la carpeta almacenada con `conexionAnterior.carpeta` (undefined) y construir el diagnóstico del objeto con binarios; corregida la identidad y retirada la instrumentación. El test aislado y la suite volvieron a aprobar.
 - SQLite existente de cero bytes se rechaza sin inicializarlo. Solo se crea tras confirmar ausencia; una marca de creación almacenada no se reutiliza en restauración. `conectarArchivo()` usa selector de apertura para existentes; la creación sigue en el flujo de carpeta y los respaldos en selector de guardado.

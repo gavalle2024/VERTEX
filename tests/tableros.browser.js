@@ -1182,6 +1182,62 @@ window.probarFase6Seguimiento = async function () {
   return { resultados };
 };
 
+window.probarColoresCSSOM = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const hojaImportada = document.getElementById('app-styles').sheet;
+  const descriptorReglas = Object.getOwnPropertyDescriptor(hojaImportada, 'cssRules');
+  const descriptorInsertar = Object.getOwnPropertyDescriptor(hojaImportada, 'insertRule');
+  let accesos = 0;
+  const bloquear = () => {
+    accesos++;
+    throw new DOMException('Cannot access rules (prueba sintética)', 'SecurityError');
+  };
+  Object.defineProperty(hojaImportada, 'cssRules', { configurable: true, get: bloquear });
+  Object.defineProperty(hojaImportada, 'insertRule', { configurable: true, value: bloquear });
+  try {
+    const fase5 = await probarFase5Tableros();
+    resultados.push(...fase5.resultados);
+    check(accesos === 0, 'CSSOM: no se accede a la hoja importada restringida');
+    check(document.getElementById('tableros-error').textContent === '' &&
+      document.querySelector('.work-card'), 'CSSOM: Tableros y tarjetas se renderizan sin error');
+    const distintivo = document.querySelector('.work-badge.work-color-336699-light');
+    check(distintivo && getComputedStyle(distintivo).backgroundColor === 'rgb(51, 102, 153)' &&
+      getComputedStyle(distintivo).color === 'rgb(255, 255, 255)', 'CSSOM: colores y contraste conservados');
+    resultados.push(...verificarSeguridadInterfaz().resultados);
+
+    const propia = document.adoptedStyleSheets.find(hoja => Array.from(hoja.cssRules)
+      .some(regla => regla.selectorText === '.work-color-336699-light'));
+    const insertar = propia.insertRule;
+    const descriptorPropio = Object.getOwnPropertyDescriptor(propia, 'insertRule');
+    Object.defineProperty(propia, 'insertRule', { configurable: true, value: bloquear });
+    try {
+      await PSA.Trabajo.guardarEtiqueta({ nombre: 'Color con fallo sintético', color: '#a1b2c3' });
+      PSA.Tableros.render();
+      check(document.getElementById('tableros-error').textContent === '' &&
+        document.getElementById('catalogo-etiquetas').textContent.includes('Color con fallo sintético'),
+      'CSSOM: fallo de inserción conserva render y estilo predeterminado');
+    } finally {
+      if (descriptorPropio) Object.defineProperty(propia, 'insertRule', descriptorPropio);
+      else delete propia.insertRule;
+    }
+    check(propia.insertRule === insertar, 'CSSOM: restauración del método tras la prueba');
+    PSA.Tableros.render();
+    check(document.querySelector('.catalog-color.work-color-a1b2c3-dark') &&
+      document.querySelectorAll('[style]').length === 0,
+    'CSSOM: reintento aplica color sin estilos inline');
+  } finally {
+    if (descriptorReglas) Object.defineProperty(hojaImportada, 'cssRules', descriptorReglas);
+    else delete hojaImportada.cssRules;
+    if (descriptorInsertar) Object.defineProperty(hojaImportada, 'insertRule', descriptorInsertar);
+    else delete hojaImportada.insertRule;
+  }
+  return { resultados };
+};
+
 window.verificarSeguridadInterfaz = function () {
   const resultados = [];
   const check = (valor, nombre) => {
@@ -1204,12 +1260,12 @@ window.verificarSeguridadInterfaz = function () {
   const distintivo = document.querySelector('.work-badge[class*="work-color-"]');
   const claseColor = distintivo && Array.from(distintivo.classList)
     .find(clase => clase.startsWith('work-color-'));
-  const hojaEstilos = document.getElementById('app-styles').sheet;
-  const colorRegla = claseColor && Array.from(hojaEstilos.cssRules)
+  const colorRegla = claseColor && document.adoptedStyleSheets
+    .flatMap(hoja => Array.from(hoja.cssRules))
     .filter(regla => regla.selectorText === '.' + claseColor);
   check(!!distintivo && !!colorRegla && colorRegla.length === 1 &&
     getComputedStyle(distintivo).backgroundColor !== 'rgba(0, 0, 0, 0)',
-  'Los colores validados usan una sola regla CSSOM de la hoja local');
+  'Los colores validados usan una sola regla en una hoja construida del documento');
 
   const guardarOriginal = PSA.Proyectos.guardarProyecto;
   let llamadas = 0;

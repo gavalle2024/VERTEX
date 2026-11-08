@@ -13,6 +13,8 @@
   let tarjetasSeleccionadas = new Set();
   let arrastre = null;
   const coloresInsertados = new Set();
+  let hojaColores = null;
+  let avisoColores = false;
   const $ = id => document.getElementById(id);
   const e = valor => PSA.escapeHtml(valor);
   const dialog = () => $('trabajo-dialog');
@@ -24,10 +26,20 @@
     const luminancia = 0.299 * (rgb >> 16 & 255) + 0.587 * (rgb >> 8 & 255) + 0.114 * (rgb & 255);
     const clase = 'work-color-' + hexadecimal.slice(1) + (luminancia < 145 ? '-light' : '-dark');
     if (!coloresInsertados.has(clase)) {
-      const hoja = $('app-styles').sheet;
-      if (!hoja) return '';
-      hoja.insertRule(`.${clase}{background-color:${hexadecimal};color:${luminancia < 145 ? '#fff' : '#111'}}`, hoja.cssRules.length);
-      coloresInsertados.add(clase);
+      try {
+        if (!hojaColores) {
+          const candidata = new CSSStyleSheet();
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, candidata];
+          hojaColores = candidata;
+        }
+        hojaColores.insertRule(`.${clase}{background-color:${hexadecimal};color:${luminancia < 145 ? '#fff' : '#111'}}`, coloresInsertados.size);
+        coloresInsertados.add(clase);
+        avisoColores = false;
+      } catch (error) {
+        if (!avisoColores) console.warn('[PSA.Tableros] No se pudo aplicar el color de etiqueta; se conserva el estilo predeterminado:', error);
+        avisoColores = true;
+        return '';
+      }
     }
     return ' ' + clase;
   }
