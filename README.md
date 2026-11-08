@@ -91,6 +91,8 @@ El acceso autorizado se recuerda en IndexedDB. Al volver a abrir la app, se inte
 - Si el archivo se movió, eliminó o perdió permisos, volver a autorizarlo o elegir otra carpeta.
 - Se reconocen también las conexiones a archivo guardadas por versiones anteriores. Hasta seleccionar una carpeta, solo se conoce el nombre del archivo.
 
+Si se revoca el permiso durante una sesión, el guardado falla sin publicar cambios y la cabecera ofrece **Reconectar vertex.db**. Esta reautorización conserva la conexión en memoria y los formularios; no guarda automáticamente: hay que reintentar la operación. Si el archivo desapareció, quedó bloqueado o cambió externamente, se informa la causa y se puede seleccionar otra carpeta de forma explícita. La API `PSA.DB.conectarArchivo()` usa `showOpenFilePicker` para archivos existentes; no se usa un selector de guardado para abrirlos, porque no permite distinguir con seguridad un archivo vacío existente de uno nuevo.
+
 ## Persistencia y protección de datos
 
 Los proyectos se guardan exclusivamente en un archivo **SQLite3 estándar**, usando **sql.js 1.10.2** en memoria y File System Access API para escribir al disco. No hay fallback ni migración automática desde `localStorage`.
@@ -99,6 +101,8 @@ Los proyectos se guardan exclusivamente en un archivo **SQLite3 estándar**, usa
 - Mientras hay una operación en curso, se bloquean las acciones incompatibles y se advierte al intentar cerrar la ventana.
 - Si falla la escritura, se mantienen los datos visibles anteriores y el formulario para reintentar; se muestra el error.
 - Un archivo corrupto o con un esquema incompatible se rechaza sin reemplazarlo por una base vacía.
+- Un SQLite existente de cero bytes también se rechaza. Solo se inicializa un archivo nuevo tras confirmar su creación en una carpeta donde no existía; una marca de creación recordada en IndexedDB no autoriza inicializar archivos vacíos al reiniciar.
+- Antes de cada transacción se consulta el permiso de lectura/escritura y se compara el archivo con el estado confirmado. Si desapareció, no se puede leer o cambió fuera de VERTEX, no se escribe. Después se valida la candidata y se espera `createWritable()`, `write()` y `close()`; un error intenta `abort()` y no confirma éxito.
 - **Exportar DB** descarga una copia completa; no modifica la ubicación conectada.
 - Las bases del esquema anterior requieren **Crear respaldo y actualizar**. Antes de escribir se crea y verifica un respaldo exacto; cancelar no modifica el original. Una base nueva usa el esquema 3. Las migraciones 1 → 2 y 2 → 3 agregan asignaciones múltiples/estado de etiquetas y el título histórico de los eventos, respectivamente.
 - Una versión de esquema futura se rechaza. La eliminación de proyectos con tableros o actividad relacionada se protege mediante un error explícito.
@@ -106,6 +110,8 @@ Los proyectos se guardan exclusivamente en un archivo **SQLite3 estándar**, usa
 El respaldo se guarda en la carpeta autorizada con nombre único (`vertex.pre-v1.…db` o `vertex.pre-v2.…db`, según corresponda); las conexiones antiguas sin carpeta solicitan un destino de respaldo vacío. La guía de [migración y recuperación](docs/migraciones.md) explica el procedimiento y cómo volver a una copia anterior sin sobrescribir la base migrada.
 
 La app está diseñada para **una instancia escritora por base**. No implementa sincronización entre pestañas, procesos o usuarios. No editar simultáneamente el archivo desde otra herramienta. Mantener respaldos periódicos.
+
+La comparación previa no es un bloqueo entre procesos: otro escritor puede modificar el archivo después de esa lectura. Si `close()` falla tras haber escrito, o hay caída del sistema, la app conserva su estado confirmado pero no puede garantizar qué bytes quedaron en disco. No restaura automáticamente ni sobrescribe para "reparar": conservar los archivos, verificar su contenido y seleccionar explícitamente la base correcta. Una creación fallida puede dejar un archivo vacío; no se elimina automáticamente.
 
 ## Requisitos y límites
 
@@ -163,7 +169,9 @@ La copia de sql.js está incluida en `tests/vendor/sql.js/1.10.2/`. `tests/db.te
 
 Para comprobar que el test Node no referencia un CDN ni `fetch`, ejecutar `rg -n 'cdnjs|https?://|fetch' tests/db.test.cjs`; no debe devolver coincidencias. Esta comprobación aplica a Node: la aplicación web mantiene su carga de sql.js desde cdnjs y, por lo tanto, su ejecución y las pruebas browser que cargan la app conservan ese requisito de red.
 
-La suite Node actual cubre **38 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+La suite Node actual cubre **64 pruebas**. Las pruebas de navegador `probarInterfazTableros()`, `probarMovimientoTarjetas()`, `probarArrastreTarjetas()`, `probarFase5Tableros()`, `probarFase6Seguimiento()` y `probarFase7Dashboard()` se ejecutan en una página aislada sin base real y usan bases sintéticas; la fase 6 incluye una comprobación estructural de accesibilidad del calendario. La suite cubre accesos, conteos, vencimientos, progreso, errores y no-op sin alterar valores confirmados, timestamps ni historial; el arrastre dispara eventos DragEvent y no simula interacción física de ratón ni táctil. En Chromium se midió un render global de 411,9 ms de mediana con 1000 tarjetas y 4000 eventos; es una referencia, no un umbral. Resultados y pasos en [arquitectura](docs/arquitectura.md) y [cambios](docs/cambios.md). No cargar el script de pruebas en una sesión con datos en uso.
+
+`probarPersistenciaA3()` agrega 27 comprobaciones de fallos y recuperación de UI. Ejecutarlo solo en una página aislada con IndexedDB interceptado antes del arranque. La matriz Node A3-01 a A3-25 y sus resultados están en [docs/migraciones.md](docs/migraciones.md). Las API de archivos son simuladas; no equivalen a permisos o bloqueos reales del sistema operativo.
 
 ## Documentación
 

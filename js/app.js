@@ -204,7 +204,7 @@ function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, 
   // Totalmente operativo → ocultar overlay
   if (tieneArchivo) {
     if (statusEl) { statusEl.textContent = (error ? '⚠ ' : '● ') + ubicacion; statusEl.className = error ? 'db-warning' : 'db-connected'; }
-    if (btnEl) { btnEl.textContent = 'Cambiar carpeta de base de datos'; btnEl.classList.remove('hidden'); }
+    if (btnEl) { btnEl.textContent = esperaPermiso ? 'Reconectar vertex.db' : 'Cambiar carpeta de base de datos'; btnEl.classList.remove('hidden'); }
     if (overlayEl) overlayEl.classList.add('hidden');
     return;
   }
@@ -238,9 +238,10 @@ function _actualizarEstadoDB({ useSQLite, tieneArchivo, esperaPermiso, ocupado, 
  */
 PSA.gestionarConexionDB = async function (elegirCarpeta = false) {
   if (PSA.DB.ocupado) return;
+  const reautorizarActiva = PSA.DB.tieneArchivo && PSA.DB.esperaPermiso && !elegirCarpeta;
   const formularioModificado = Array.from(document.querySelectorAll('#v-proyectos .grid input, #v-proyectos .grid textarea, #v-proyectos .grid select'))
     .some(el => el.tagName === 'SELECT' ? el.selectedIndex !== 0 : el.value !== el.defaultValue);
-  if (formularioModificado || PSA.Proyectos.editandoId) {
+  if (!reautorizarActiva && (formularioModificado || PSA.Proyectos.editandoId)) {
     if (!confirm('Hay datos sin guardar en el formulario. Si cambia de base, se descartarán. ¿Continuar?')) return;
   }
   try {
@@ -248,6 +249,10 @@ PSA.gestionarConexionDB = async function (elegirCarpeta = false) {
       ? await PSA.DB.solicitarPermiso()
       : await PSA.DB.configurarCarpeta();
     if (resultado.ok) {
+      if (resultado.reautorizada) {
+        PSA.toast('Acceso autorizado. Reintente el guardado pendiente.');
+        return;
+      }
       PSA.Proyectos.limpiarForm();
       PSA.Tableros.reiniciar();
       PSA.Calendario.reiniciar();

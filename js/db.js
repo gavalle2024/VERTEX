@@ -57,6 +57,36 @@
     console.error('[PSA.DB]', e);
   }
 
+  function _errorArchivo(e, etapa, handle) {
+    const motivos = {
+      NotAllowedError: 'Permiso denegado o revocado. Reconecte el archivo para autorizar el acceso.',
+      SecurityError: 'El navegador bloqueó el acceso. Verifique los permisos y el contexto seguro.',
+      NotFoundError: 'Archivo no encontrado. Seleccione nuevamente su ubicación.',
+      NoModificationAllowedError: 'Archivo bloqueado o no modificable. Cierre otras aplicaciones y reintente.',
+      NotReadableError: 'Archivo inaccesible para lectura. Verifique su disponibilidad.',
+      QuotaExceededError: 'Espacio insuficiente para escribir el archivo.',
+      AbortError: 'La operación de archivo fue interrumpida; no se confirmó el guardado.'
+    };
+    if (e.name === 'NotAllowedError' && _conexion && handle === _conexion.archivo) {
+      _pendiente = _conexion;
+    }
+    return new Error(etapa + ': ' + (motivos[e.name] || e.message), { cause: e });
+  }
+
+  async function _comprobarPermiso(conexion) {
+    if (typeof conexion.archivo.queryPermission !== 'function') return;
+    try {
+      if (await conexion.archivo.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+        _pendiente = conexion;
+        const error = new Error('Permiso de lectura y escritura requerido.');
+        error.name = 'NotAllowedError';
+        throw error;
+      }
+    } catch (e) {
+      throw _errorArchivo(e, 'Acceso a SQLite', conexion.archivo);
+    }
+  }
+
   async function _idbOperacion(modo, ejecutar) {
     const idb = await new Promise((resolve, reject) => {
       const req = indexedDB.open(IDB_NAME, 1);
@@ -78,17 +108,20 @@
   }
 
   async function _escribirArchivo(handle, data) {
-    const writable = await handle.createWritable();
+    let writable;
     try {
+      writable = await handle.createWritable();
       await writable.write(data);
       await writable.close();
     } catch (e) {
-      try {
-        await writable.abort();
-      } catch (abortError) {
-        console.warn('[PSA.DB] No se pudo abortar la escritura:', abortError);
+      if (writable) {
+        try {
+          await writable.abort();
+        } catch (abortError) {
+          console.warn('[PSA.DB] No se pudo abortar la escritura:', abortError);
+        }
       }
-      throw e;
+      throw _errorArchivo(e, 'Escritura SQLite no confirmada', handle);
     }
   }
 
@@ -99,11 +132,14 @@
     return data;
   }
 
-  function _crearDB(data) {
+  function _crearDB(data, nueva = false) {
+    if (!data.length && !nueva) {
+      throw new Error('El archivo SQLite existente está vacío. No se modificó ni se reemplazó la conexión activa.');
+    }
     const candidata = data.length ? new _SQL.Database(data) : new _SQL.Database();
     try {
       const versionOriginal = candidata.exec('PRAGMA user_version')[0].values[0][0];
-      const requiereMigracion = window.PSA.Esquema.preparar(candidata, !data.length);
+      const requiereMigracion = window.PSA.Esquema.preparar(candidata, nueva && !data.length);
       return { candidata, requiereMigracion, versionOriginal };
     } catch (e) {
       candidata.close();
@@ -112,9 +148,9 @@
   }
 
   async function _activar(conexion) {
-    const file = await conexion.archivo.getFile();
-    const datos = new Uint8Array(await file.arrayBuffer());
-    const { candidata, requiereMigracion, versionOriginal } = _crearDB(datos);
+    await _comprobarPermiso(conexion);
+    const datos = await _leerBinario(conexion.archivo);
+    const { candidata, requiereMigracion, versionOriginal } = _crearDB(datos, !!conexion.nueva);
     if (requiereMigracion) {
       candidata.close();
       _migracion = { conexion, original: datos, versionOriginal };
@@ -126,6 +162,7 @@
       candidata.close();
       throw e;
     }
+    conexion.nueva = false;
     await _publicarConexion(conexion, candidata);
     return true;
   }
@@ -157,9 +194,16 @@
       const guardado = await _idbOperacion('readonly', store => store.get(IDB_KEY));
       if (guardado) {
         // Compatibilidad con el FileSystemFileHandle guardado por versiones anteriores.
-        _pendiente = guardado.kind === 'file' ? { archivo: guardado, carpeta: null } : guardado;
+        const conexion = guardado.kind === 'file' ? { archivo: guardado, carpeta: null } : guardado;
+        if (!conexion.archivo || typeof conexion.archivo.getFile !== 'function' ||
+            typeof conexion.archivo.queryPermission !== 'function') {
+          throw new Error('El handle recordado en IndexedDB es inválido. Seleccione nuevamente la carpeta.');
+        }
+        _pendiente = { archivo: conexion.archivo, carpeta: conexion.carpeta || null };
         if (await _pendiente.archivo.queryPermission({ mode: 'readwrite' }) === 'granted') {
-          await _activar(_pendiente);
+          const disponible = _pendiente;
+          _pendiente = null;
+          await _activar(disponible);
         }
       }
     } catch (e) {
@@ -188,8 +232,10 @@
       return { ok: activa, requiereMigracion: !activa, nombre: conexion.archivo.name };
     } catch (e) {
       if (e.name === 'AbortError') return { ok: false, cancelado: true };
-      _registrarError(e);
-      throw e;
+      const error = ['NotAllowedError', 'SecurityError', 'NotFoundError', 'NotReadableError',
+        'NoModificationAllowedError'].includes(e.name) ? _errorArchivo(e, 'Apertura SQLite') : e;
+      _registrarError(error);
+      throw error;
     } finally {
       _finalizarOperacion();
     }
@@ -206,6 +252,7 @@
         startIn: _conexion && _conexion.carpeta ? _conexion.carpeta : 'documents'
       });
       let archivo;
+      let nueva = false;
       try {
         archivo = await carpeta.getFileHandle(DB_FILENAME);
       } catch (e) {
@@ -214,16 +261,20 @@
           return null;
         }
         archivo = await carpeta.getFileHandle(DB_FILENAME, { create: true });
+        nueva = true;
       }
-      return { archivo, carpeta };
+      return { archivo, carpeta, nueva };
     });
   }
 
   async function conectarArchivo() {
     return _conectar(async () => {
-      const archivo = await window.showSaveFilePicker({
+      if (typeof window.showOpenFilePicker !== 'function') {
+        throw new Error('La selección de archivos requiere Chrome o Edge en un contexto seguro. Use Seleccionar carpeta.');
+      }
+      const [archivo] = await window.showOpenFilePicker({
         id: 'vertex_db',
-        suggestedName: DB_FILENAME,
+        multiple: false,
         types: [{ description: 'Base de datos SQLite', accept: { 'application/octet-stream': ['.db'] } }]
       });
       return { archivo, carpeta: null };
@@ -232,6 +283,22 @@
 
   async function solicitarPermiso() {
     if (!_pendiente) throw new Error('No hay una conexión pendiente de permiso.');
+    if (_pendiente === _conexion) {
+      _iniciarOperacion();
+      try {
+        if (await _conexion.archivo.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+          throw new Error('Permiso denegado. Puede reintentar o seleccionar otra carpeta.');
+        }
+        await _leerBinario(_conexion.archivo);
+        _pendiente = null;
+        return { ok: true, reautorizada: true, nombre: _conexion.archivo.name };
+      } catch (e) {
+        _registrarError(e);
+        throw e;
+      } finally {
+        _finalizarOperacion();
+      }
+    }
     return _conectar(async () => {
       const conexion = _pendiente;
       if (await conexion.archivo.requestPermission({ mode: 'readwrite' }) !== 'granted') {
@@ -246,7 +313,11 @@
   }
 
   async function _leerBinario(handle) {
-    return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    try {
+      return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    } catch (e) {
+      throw _errorArchivo(e, 'Lectura SQLite', handle);
+    }
   }
 
   async function _respaldar(solicitud, destino) {
@@ -351,8 +422,14 @@
     _iniciarOperacion();
     let candidata;
     try {
+      await _comprobarPermiso(_conexion);
+      const archivoActual = await _leerBinario(_conexion.archivo);
+      const confirmado = _exportar(_db);
+      if (!_iguales(archivoActual, confirmado)) {
+        throw new Error('El archivo SQLite cambió fuera de VERTEX. No se sobrescribió; seleccione nuevamente la base y revise los datos antes de reintentar.');
+      }
       // El estado visible solo cambia después de confirmar la escritura al disco.
-      candidata = new _SQL.Database(_exportar(_db));
+      candidata = new _SQL.Database(confirmado);
       candidata.run('PRAGMA foreign_keys=ON');
       candidata.run('BEGIN IMMEDIATE');
       let resultado;

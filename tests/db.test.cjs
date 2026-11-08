@@ -32,17 +32,22 @@ before(async () => {
 function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
   return {
     kind: 'file', name: nombre, datos: inicial, fallo: false, escrituras: 0, permiso: 'granted',
+    writableCreados: 0, abortos: 0,
     async queryPermission() { return this.permiso; },
     async requestPermission() { return this.permiso; },
     async getFile() {
+      if (this.errorLectura) throw this.errorLectura;
       const copia = this.datos.slice();
       return { arrayBuffer: async () => copia.buffer };
     },
     async createWritable() {
+      if (this.errorWritable) throw this.errorWritable;
+      this.writableCreados++;
       const file = this;
       let temporal;
       return {
         async write(data) {
+          if (file.errorEscritura) throw file.errorEscritura;
           if (file.fallo) throw new Error('Disco sin espacio');
           temporal = data.slice();
         },
@@ -52,13 +57,17 @@ function archivo(nombre = 'vertex.db', inicial = new Uint8Array()) {
           file.datos = temporal;
           file.escrituras++;
         },
-        async abort() {}
+        async abort() {
+          file.abortos++;
+          if (file.errorAbort) throw file.errorAbort;
+          temporal = undefined;
+        }
       };
     }
   };
 }
 
-function carpeta(file = archivo()) {
+function carpeta(file = null) {
   return {
     kind: 'directory', name: 'Datos PSA', file, creaciones: 0, respaldos: new Map(),
     async getFileHandle(nombre, options) {
@@ -240,6 +249,206 @@ test('cancelar o abrir una base corrupta/incompatible no reemplaza la conexión 
   incompatible.close();
 });
 
+test('rechaza un archivo SQLite existente vacío sin alterar la conexión activa', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const conexionAnterior = app.window.seleccion;
+  const bytesAnteriores = conexionAnterior.file.datos.slice();
+  const vacio = archivo('vertex.db', new Uint8Array());
+  app.window.seleccion = carpeta(vacio);
+
+  await assert.rejects(app.db.configurarCarpeta(), /archivo SQLite existente está vacío/);
+
+  assert.equal(app.db.tieneArchivo, true);
+  assert.equal(app.db.getProyectos()[0].id, 'p1');
+  assert.ok(app.store.get('vertex_db').carpeta === conexionAnterior);
+  assert.equal(vacio.escrituras, 0);
+  assert.deepEqual(conexionAnterior.file.datos, bytesAnteriores);
+});
+
+const escenariosA3 = [
+  ['A3-01', 'SQLite válida'], ['A3-02', 'archivo inexistente'], ['A3-03', 'archivo vacío'],
+  ['A3-04', 'archivo no SQLite'], ['A3-05', 'esquema inválido'], ['A3-06', 'base nueva'],
+  ['A3-07', 'permiso de lectura'], ['A3-08', 'permiso de escritura'], ['A3-09', 'permiso denegado'],
+  ['A3-10', 'permiso revocado'], ['A3-11', 'archivo bloqueado'], ['A3-12', 'createWritable fallido'],
+  ['A3-13', 'write fallido'], ['A3-14', 'close fallido'], ['A3-15', 'escritura abortada'],
+  ['A3-16', 'reapertura'], ['A3-17', 'reintento'], ['A3-18', 'handle IndexedDB inválido'],
+  ['A3-19', 'API no disponible'], ['A3-20', 'guardados simultáneos']
+];
+
+function errorArchivoPrueba(nombre, mensaje = nombre) {
+  const error = new Error(mensaje);
+  error.name = nombre;
+  return error;
+}
+
+for (const [id, nombre] of escenariosA3) {
+  test(id + ': ' + nombre, async () => {
+    const app = await entornoNuevo();
+    await app.db.saveProyecto(proyecto, true);
+    const file = app.window.seleccion.file;
+    const original = file.datos.slice();
+    const escrituras = file.escrituras;
+    const cambio = { ...proyecto, nombre: 'Cambio A3' };
+    if (['A3-01', 'A3-07', 'A3-16'].includes(id)) {
+      const reapertura = entorno(file);
+      await reapertura.db.init();
+      assert.equal(reapertura.db.tieneArchivo, true);
+      assert.equal(reapertura.db.getProyectos()[0].nombre, 'Prueba');
+      assert.equal(file.escrituras, escrituras);
+    } else if (['A3-02', 'A3-03', 'A3-04', 'A3-05'].includes(id)) {
+      let datos = id === 'A3-04' ? new Uint8Array([1, 2, 3]) : new Uint8Array();
+      if (id === 'A3-05') {
+        const incompatible = new SQL.Database();
+        incompatible.run('CREATE TABLE otra (id TEXT)');
+        datos = incompatible.export();
+        incompatible.close();
+      }
+      const candidata = archivo('vertex.db', datos);
+      if (id === 'A3-02') candidata.errorLectura = errorArchivoPrueba('NotFoundError');
+      app.window.seleccion = carpeta(candidata);
+      await assert.rejects(app.db.configurarCarpeta(), id === 'A3-02' ? /Archivo no encontrado/ : /vacío|inválido/);
+      assert.equal(candidata.escrituras, 0);
+      assert.deepEqual(candidata.datos, datos);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+      assert.deepEqual(file.datos, original);
+    } else if (id === 'A3-06') {
+      app.window.seleccion = carpeta();
+      await app.db.configurarCarpeta();
+      assert.equal(app.window.seleccion.creaciones, 1);
+      assert.equal(app.db.getProyectos().length, 0);
+      assert.equal(app.db.consultar('SELECT count(*) AS cantidad FROM tarjetas')[0].cantidad, 0);
+      assert.deepEqual(file.datos, original);
+    } else if (id === 'A3-08') {
+      await app.db.saveProyecto(cambio, false);
+      assert.equal(file.escrituras, escrituras + 1);
+      const reapertura = entorno(file);
+      await reapertura.db.init();
+      assert.equal(reapertura.db.getProyectos()[0].nombre, 'Cambio A3');
+    } else if (['A3-09', 'A3-10'].includes(id)) {
+      file.permiso = id === 'A3-09' ? 'denied' : 'prompt';
+      await assert.rejects(app.db.saveProyecto(cambio, false), /Permiso denegado o revocado/);
+      assert.equal(app.db.esperaPermiso, true);
+      await assert.rejects(app.db.solicitarPermiso(), /Permiso denegado/);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+      assert.deepEqual(file.datos, original);
+      file.permiso = 'granted';
+      assert.equal((await app.db.solicitarPermiso()).reautorizada, true);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+      await app.db.saveProyecto(cambio, false);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Cambio A3');
+    } else if (['A3-11', 'A3-12', 'A3-13', 'A3-14', 'A3-15', 'A3-17'].includes(id)) {
+      if (id === 'A3-11') file.errorWritable = errorArchivoPrueba('NoModificationAllowedError');
+      if (id === 'A3-12') file.errorWritable = new Error('Fallo createWritable');
+      if (['A3-13', 'A3-17'].includes(id)) file.fallo = true;
+      if (id === 'A3-14') file.falloCierre = true;
+      if (id === 'A3-15') file.errorEscritura = errorArchivoPrueba('AbortError');
+      await assert.rejects(app.db.saveProyecto(cambio, false), /Escritura SQLite no confirmada/);
+      assert.equal(file.abortos, ['A3-11', 'A3-12'].includes(id) ? 0 : 1);
+      assert.equal(file.escrituras, escrituras);
+      assert.deepEqual(file.datos, original);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+      assert.equal(app.db.ocupado, false);
+      assert.match(app.eventos.at(-1).error, /Escritura SQLite no confirmada/);
+      file.errorWritable = null;
+      file.errorEscritura = null;
+      file.fallo = false;
+      file.falloCierre = false;
+      await app.db.saveProyecto(cambio, false);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Cambio A3');
+    } else if (id === 'A3-18') {
+      const rota = entorno({ archivo: { kind: 'file' }, carpeta: null });
+      const estado = await rota.db.init();
+      assert.match(estado.error, /IndexedDB es inválido/);
+      assert.equal(estado.esperaPermiso, false);
+      await rota.db.configurarCarpeta();
+      assert.equal(rota.db.tieneArchivo, true);
+    } else if (id === 'A3-19') {
+      app.window.showDirectoryPicker = undefined;
+      await assert.rejects(app.db.configurarCarpeta(), /Chrome o Edge/);
+      await assert.rejects(app.db.conectarArchivo(), /selección de archivos/);
+      assert.equal(app.db.hasFSA, false);
+      assert.deepEqual(file.datos, original);
+    } else if (id === 'A3-20') {
+      let liberar;
+      file.esperarCierre = new Promise(resolve => { liberar = resolve; });
+      const pendiente = app.db.saveProyecto(cambio, false);
+      const segundo = app.db.saveProyecto({ ...cambio, nombre: 'No guardar' }, false);
+      await assert.rejects(segundo, /operación.*curso/);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(file.escrituras, escrituras);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+      liberar();
+      await pendiente;
+      assert.equal(file.escrituras, escrituras + 1);
+      assert.equal(app.db.getProyectos()[0].nombre, 'Cambio A3');
+    }
+  });
+}
+
+test('A3-21: cambios externos y desaparición durante una sesión no se sobrescriben', async () => {
+  const app = await entornoNuevo();
+  await app.db.saveProyecto(proyecto, true);
+  const file = app.window.seleccion.file;
+  const original = file.datos.slice();
+  file.errorLectura = errorArchivoPrueba('NotFoundError');
+  await assert.rejects(app.db.saveProyecto({ ...proyecto, nombre: 'No guardar' }, false), /Archivo no encontrado/);
+  file.errorLectura = null;
+  file.datos = new Uint8Array([1, 2, 3]);
+  await assert.rejects(app.db.saveProyecto(proyecto, false), /cambió fuera de VERTEX/);
+  assert.deepEqual(Array.from(file.datos), [1, 2, 3]);
+  assert.equal(app.db.getProyectos()[0].nombre, 'Prueba');
+  file.datos = original;
+  await app.db.saveProyecto(proyecto, false);
+});
+
+test('A3-22: falla de abort conserva el error original sin publicar cambios', async () => {
+  const app = await entornoNuevo();
+  const file = app.window.seleccion.file;
+  file.fallo = true;
+  file.errorAbort = new Error('Fallo abort');
+  await assert.rejects(app.db.saveProyecto(proyecto, true), /Disco sin espacio/);
+  assert.equal(file.abortos, 1);
+  assert.equal(app.db.getProyectos().length, 0);
+});
+
+test('A3-23: selector de apertura rechaza vacíos y conserva la conexión previa', async () => {
+  const app = await entornoNuevo();
+  const anterior = app.window.seleccion.file;
+  app.window.showOpenFilePicker = async () => [archivo()];
+  await assert.rejects(app.db.conectarArchivo(), /existente está vacío/);
+  assert.equal(app.db.tieneArchivo, true);
+  app.window.showOpenFilePicker = async () => [anterior];
+  assert.equal((await app.db.conectarArchivo()).ok, true);
+  app.window.showOpenFilePicker = async () => { throw errorArchivoPrueba('AbortError'); };
+  assert.equal((await app.db.conectarArchivo()).cancelado, true);
+});
+
+test('A3-24: restauración inaccesible y selector denegado permiten recuperación manual', async () => {
+  const creadora = await entornoNuevo();
+  const file = creadora.window.seleccion.file;
+  file.errorLectura = errorArchivoPrueba('NotReadableError');
+  const app = entorno(file);
+  const estado = await app.db.init();
+  assert.match(estado.error, /inaccesible para lectura/);
+  assert.equal(estado.tieneArchivo, false);
+  assert.equal(estado.esperaPermiso, false);
+  app.window.errorSelector = errorArchivoPrueba('NotAllowedError');
+  await assert.rejects(app.db.configurarCarpeta(), /Permiso denegado o revocado/);
+  app.window.errorSelector = null;
+  await app.db.configurarCarpeta();
+  assert.equal(app.db.tieneArchivo, true);
+});
+
+test('A3-25: una marca nueva recordada no permite sobrescribir un archivo existente vacío', async () => {
+  const file = archivo();
+  const app = entorno({ archivo: file, carpeta: null, nueva: true });
+  const estado = await app.db.init();
+  assert.match(estado.error, /existente está vacío/);
+  assert.equal(estado.tieneArchivo, false);
+  assert.equal(file.escrituras, 0);
+});
+
 test('crear una base requiere confirmación y no copia los datos de otra base', async () => {
   const app = entorno();
   await app.db.init();
@@ -258,7 +467,8 @@ test('crear una base requiere confirmación y no copia los datos de otra base', 
 });
 
 test('recupera handles antiguos y permite reintentar un permiso denegado', async () => {
-  const file = archivo();
+  const creadora = await entornoNuevo();
+  const file = archivo('vertex.db', creadora.window.seleccion.file.datos.slice());
   file.permiso = 'prompt';
   const app = entorno(file);
   const estado = await app.db.init();

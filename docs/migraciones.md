@@ -145,6 +145,44 @@ Las pruebas usan SQLite real y handles/IndexedDB simulados. Cubren legado, conse
 
 La prueba de navegador aislada `probarFase5Tableros()` comprueba catálogos UI, asignaciones múltiples, prioridad, búsquedas, filtros individuales y combinados, estado vacío, conservación de orden, drag bloqueado y movimiento explícito de selección oculta. `probarFase6Seguimiento()` comprueba 25 casos de las vistas mensuales/semanales/agenda, navegación, fechas, filtros temporales, historial, no-op, estructura ARIA y actualización tras guardar; resultados en [cambios.md](cambios.md).
 
-La prueba que lee la base habitual crea únicamente una copia en memoria y verifica que el original permanece idéntico. Las migraciones v1 → v3 y v2 → v3 se probaron con binarios sintéticos y respaldo simulado; no se ejecutaron sobre la base habitual.
+Ninguna prueba lee la base habitual ni crea copias de ella. Todas las bases son sintéticas, incluido el caso de reapertura. Las migraciones v1 → v3 y v2 → v3 usan binarios sintéticos y respaldo simulado; no se ejecutan sobre datos reales.
+
+### Auditoría A3 y matriz de archivos
+
+Resultado Node A3: **64 aprobadas, 0 fallidas**. Incluye la matriz A3-01 a A3-25 y las regresiones existentes. Los permisos, IndexedDB y Writable son mocks; sql.js 1.10.2 y SQLite se ejecutan realmente desde los artefactos locales.
+
+| ID | Escenario sintético | Resultado comprobado |
+|---|---|---|
+| A3-01 | Abrir válida | Lectura y conexión correcta sin reescritura |
+| A3-02 | Archivo inexistente | Error clasificado, conexión anterior intacta |
+| A3-03 | Archivo existente vacío | Rechazo sin inicializar ni escribir |
+| A3-04 | No SQLite | Rechazo sin reemplazo |
+| A3-05 | Esquema inválido | Rechazo controlado |
+| A3-06 | Crear nueva | Creación explícita, esquema y tablas vacías |
+| A3-07 | Permiso de lectura concedido | Restauración y consulta; conexión requiere readwrite |
+| A3-08 | Permiso de escritura concedido | Escritura y reapertura del cambio |
+| A3-09 | Denegado | Error, conservación y reautorización |
+| A3-10 | Revocado durante sesión | Reconexión sin reemplazo del estado en memoria |
+| A3-11 | Bloqueado | Fallo de Writable sin confirmar |
+| A3-12 | createWritable falla | No abortar stream inexistente ni confirmar |
+| A3-13 | write falla | Aborto intentado, sin publicación |
+| A3-14 | close falla | Aborto intentado, sin éxito comunicado |
+| A3-15 | AbortError de escritura | Error de persistencia, no cancelación de selector |
+| A3-16 | Reapertura | Datos confirmados disponibles |
+| A3-17 | Reintento | Recuperación tras fallo de escritura |
+| A3-18 | Handle inválido en IndexedDB | Error y selección manual disponible |
+| A3-19 | API no disponible | Mensaje controlado, datos conservados |
+| A3-20 | Dos guardados | Segundo rechazado; una escritura confirmada |
+| A3-21 | Desaparición y cambio externo | Lectura/comparación impiden sobrescritura |
+| A3-22 | abort falla | Error original conservado, candidata no publicada |
+| A3-23 | Selector de apertura | Vacío rechazado, válido abierto, cancelación sin cambio |
+| A3-24 | Restauración inaccesible / selector denegado | Diagnóstico y recuperación manual |
+| A3-25 | Marca nueva recordada | No autoriza sobrescribir un existente vacío |
+
+Browser: `probarPersistenciaA3()` en una página aislada con IndexedDB interceptado antes del arranque. Sus **27 comprobaciones** simulan archivo bloqueado, fallos de createWritable/write/close/abort, desaparición, permisos revocados/denegados, conservación de formulario, reautorización y reintento. Devuelve el binario virtual para reapertura sintética. Las seis suites existentes aprobaron **164** comprobaciones y `verificarSeguridadInterfaz()` aprobó **7**, sin excepciones JavaScript no controladas ni violaciones CSP. Los errores de disco/validación provocados intencionalmente pueden aparecer en consola.
+
+Los archivos existentes de cero bytes se rechazan; solo se crea una base tras confirmar que no existía. Se valida una candidata antes de publicar, y se elimina la marca de creación del estado recordado. La API de apertura de archivos usa `showOpenFilePicker`, evitando el ambiguo selector de guardado; los respaldos siguen usando `showSaveFilePicker`. Antes de transaccionar se consulta permiso, se lee el archivo y se compara con el estado confirmado; solo write y close exitosos permiten publicar.
+
+Si se revoca acceso a la conexión activa, reautorizar no carga otra DB ni limpia formularios: después se reintenta. No hay reparación automática, eliminación ni restauración silenciosa. Una carrera con otro proceso entre lectura y escritura, un close de resultado ambiguo o daño físico siguen fuera de las garantías; la app conserva su estado confirmado e informa error, pero no puede asegurar rollback del archivo. Mantener un solo escritor y respaldos. Quedan pendientes pruebas manuales de permisos/selectores nativos y bloqueos reales del sistema operativo.
 
 Los selectores y permisos del sistema operativo no se aprueban automáticamente: requieren validación manual del usuario. En navegador se puede comprobar el flujo con handles simulados sin escribir datos reales.

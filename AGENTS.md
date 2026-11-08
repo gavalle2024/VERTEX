@@ -98,6 +98,8 @@ Todo el código usa el objeto global `window.PSA` para evitar colisiones:
 - La CSP necesita soporte para `wasm-unsafe-eval` además de File System Access API; Chrome/Edge ≥ 86 por sí solo no garantiza compatibilidad con WebAssembly bajo esta política.
 - `saveProyecto()` y `deleteProyecto()` son asíncronas: siempre esperarlas antes de limpiar formularios, renderizar o notificar éxito.
 - No sustituir una base inválida por una vacía. Validar una instancia candidata antes de reemplazar la conexión.
+- No inicializar archivos existentes de cero bytes. Crear solo tras confirmación de ausencia; no confiar en una marca `nueva` recordada. `conectarArchivo()` abre existentes con `showOpenFilePicker`; crear bases continúa siendo una acción explícita de carpeta.
+- Antes de guardar, comprobar permiso y bytes del archivo respecto del estado confirmado. Reautorizar el handle activo no recarga SQLite ni descarta formularios: devuelve `reautorizada` y requiere reintento explícito. No confundir AbortError de Writable con cancelación de selector.
 - No permitir operaciones concurrentes ni escrituras con debounce. La instancia visible solo cambia después de `write()` y `close()` exitosos.
 - `PSA.DB.estado` y el evento `psa:db-state` centralizan conexión, ubicación, ocupación y errores. Reutilizarlos para actualizar la UI.
 - No prometer acceso por una ruta escrita ni mostrar nombres de carpeta como rutas absolutas. El navegador requiere selección autorizada.

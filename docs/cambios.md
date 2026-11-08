@@ -6,6 +6,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/) · Versionado semán
 
 ## [Sin publicar] — 2026-11-07
 
+### Robustez de persistencia y archivos (A3)
+- Retomados los cambios previos en DB y pruebas sin revertirlos. El fallo de memoria del test vacío ocurría al comparar la carpeta almacenada con `conexionAnterior.carpeta` (undefined) y construir el diagnóstico del objeto con binarios; corregida la identidad y retirada la instrumentación. El test aislado y la suite volvieron a aprobar.
+- SQLite existente de cero bytes se rechaza sin inicializarlo. Solo se crea tras confirmar ausencia; una marca de creación almacenada no se reutiliza en restauración. `conectarArchivo()` usa selector de apertura para existentes; la creación sigue en el flujo de carpeta y los respaldos en selector de guardado.
+- Lectura y permiso se comprueban antes de cada transacción; los bytes externos deben coincidir con el estado confirmado. Errores de lectura, permisos, bloqueo, cuota y Writable se informan sin confirmar guardado. Se intenta abortar un stream creado al fallar write/close; AbortError de persistencia no se interpreta como cancelación de selector.
+- Reautorizar acceso a la DB activa no reemplaza SQLite ni descarta formularios; el usuario reintenta el guardado. Un handle IndexedDB inválido permite selección manual. No hay reparación ni restauración automática ante resultados ambiguos o carreras con escritores externos.
+- Node: **64 aprobadas, 0 fallidas**, con matriz A3-01 a A3-25 y regresión existente. Browser con archivos/IndexedDB sintéticos: A3 **27**, regresión **164**, seguridad CSP **7** comprobaciones; sin excepciones no controladas ni violaciones CSP.
+- No se abrió, leyó ni modificó la base habitual ni archivos auxiliares. Sin dependencias nuevas, staging, commits u operaciones remotas. Selectores, permisos y bloqueos reales del SO siguen pendientes de validación manual; los mocks no certifican esos escenarios.
+
 ### Seguridad de interfaz y CSP (A2)
 - Se eliminaron los 19 atributos de evento inline de `index.html` y se centralizaron las acciones estáticas por delegación `data-action` en `app.js`; pestañas y filtros usan listeners JavaScript.
 - CSP meta estricta: `default-src 'self'`, scripts de `self` y cdnjs, `wasm-unsafe-eval` para el compilador WASM de sql.js, estilos/imágenes/fuentes de `self`, conexiones a cdnjs para WASM, `object-src 'none'`, `base-uri 'self'` y `form-action 'self'`. Sin `unsafe-inline` ni `unsafe-eval`.

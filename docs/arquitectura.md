@@ -86,12 +86,16 @@ Un error en IndexedDB se registra y se muestra: no impide usar una base ya conec
 
 #### Escritura confirmada y exclusión de operaciones
 
+A3 agrega comprobación de permiso `readwrite` y lectura/comparación del archivo con el estado confirmado antes de mutar. Los errores de acceso, bloqueo, espacio, lectura y escritura se clasifican sin publicar la candidata. La cancelación de un selector devuelve `cancelado`; un `AbortError` durante Writable es un error de escritura no confirmada, no una cancelación exitosa. Solo la ausencia confirmada seguida de creación autoriza inicializar un SQLite nuevo: un existente vacío se rechaza.
+
+Un permiso revocado sobre el archivo activo ofrece reconexión. `solicitarPermiso()` devuelve `reautorizada: true` después de recuperar acceso, sin reemplazar SQLite en memoria ni limpiar formularios; el guardado requiere reintento. Un handle inválido de IndexedDB o una lectura fallida durante restauración permite volver al selector manual. `conectarArchivo()` usa `showOpenFilePicker` para existentes; `showSaveFilePicker` queda para respaldos.
+
 ```text
 validar formulario
        |
 adquirir exclusión de operación -> emitir psa:db-state (ocupado)
        |
-clonar SQLite confirmado y ejecutar INSERT / UPDATE / DELETE parametrizado
+comprobar permisos y bytes del archivo -> clonar SQLite confirmado y ejecutar INSERT / UPDATE / DELETE parametrizado
        |
 createWritable -> write -> close
        |
@@ -101,6 +105,8 @@ reemplazar instancia confirmada -> liberar exclusión -> renderizar -> notificar
 Se elimina el debounce de escritura. Mientras se escribe o conecta, se rechazan operaciones concurrentes. La UI deshabilita controles de proyectos y conexión, muestra el estado y registra `beforeunload` para advertir al cerrar.
 
 Si falla la escritura, la candidata se descarta, se intenta abortar el stream y se conservan la instancia confirmada y el formulario para reintentar. No se notifica éxito antes de `close()`.
+
+La comparación previa no sustituye exclusión entre procesos; existe una ventana entre lectura y escritura. Un cierre ambiguo, aborto fallido o interrupción física puede dejar el archivo en un estado no conocido: VERTEX informa fallo pero no restaura ni sobrescribe automáticamente. Puede quedar un archivo vacío tras una creación fallida; se conserva para revisión, no se elimina. Una reautorización recupera acceso, no garantiza integridad del archivo: la comparación se repite al reintentar guardar.
 
 La carga de archivos dañados o incompatibles nunca se convierte silenciosamente en una base vacía. Cancelar o fallar un cambio de ubicación conserva la conexión previa. Al cambiar con éxito, se limpia el formulario; si había datos sin guardar, se pide confirmación previamente.
 

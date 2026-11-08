@@ -39,15 +39,21 @@ window.prepararPruebaTableros = async function (datos = []) {
   } });
   const file = {
     kind: 'file', name: 'vertex.db', datos: new Uint8Array(datos), fallo: false, falloCierre: false,
+    permiso: 'granted', abortos: 0, escrituras: 0,
+    async queryPermission() { return this.permiso; },
+    async requestPermission() { return this.permiso; },
     async getFile() {
+      if (this.errorLectura) throw this.errorLectura;
       const bytes = this.datos.slice();
       return { arrayBuffer: async () => bytes.buffer };
     },
     async createWritable() {
+      if (this.errorWritable) throw this.errorWritable;
       const archivo = this;
       let bytes;
       return {
         async write(data) {
+          if (archivo.errorEscritura) throw archivo.errorEscritura;
           if (archivo.fallo) throw new Error('Disco sin espacio (prueba aislada)');
           bytes = data.slice();
         },
@@ -55,18 +61,105 @@ window.prepararPruebaTableros = async function (datos = []) {
           if (archivo.esperar) await archivo.esperar;
           if (archivo.falloCierre) throw new Error('Error al cerrar el archivo (prueba aislada)');
           archivo.datos = bytes;
+          archivo.escrituras++;
         },
-        async abort() {}
+        async abort() { archivo.abortos++; bytes = undefined; }
       };
     }
   };
   window.__archivoPruebaTableros = file;
+  let existe = datos.length > 0;
   window.showDirectoryPicker = async () => ({
-    kind: 'directory', name: 'Prueba aislada', async getFileHandle() { return file; }
+    kind: 'directory', name: 'Prueba aislada', async getFileHandle(nombre, opciones) {
+      if (!existe && !opciones?.create) throw new DOMException('No existe', 'NotFoundError');
+      existe = true;
+      return file;
+    }
   });
   window.confirm = () => true;
   await PSA.gestionarConexionDB();
   if (!PSA.DB.tieneArchivo) throw new Error('No se conectó la base de prueba.');
+};
+
+window.probarPersistenciaA3 = async function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  await prepararPruebaTableros();
+  const file = window.__archivoPruebaTableros;
+  const selector = window.showDirectoryPicker;
+  const set = (id, valor) => { document.getElementById(id).value = valor; };
+  set('p-nombre', 'Proyecto sintético A3');
+  set('p-responsable', 'Responsable de prueba');
+  set('p-inicio', '2026-11-07');
+  await PSA.Proyectos.guardarProyecto();
+  const proyecto = PSA.DB.getProyectos()[0];
+  check(!!proyecto, 'A3 browser: creación confirmada en archivo virtual');
+  const original = file.datos.slice();
+  const mismasBytes = () => file.datos.length === original.length &&
+    file.datos.every((valor, indice) => valor === original[indice]);
+  PSA.Proyectos.editarProyecto(proyecto.id);
+  set('p-nombre', 'Cambio pendiente A3');
+  const fallos = [
+    ['errorWritable', new DOMException('Bloqueo simulado', 'NoModificationAllowedError')],
+    ['errorWritable', new Error('Fallo createWritable sintético')],
+    ['fallo', true], ['falloCierre', true],
+    ['errorEscritura', new DOMException('Abortado simulado', 'AbortError')],
+    ['errorLectura', new DOMException('Archivo eliminado simulado', 'NotFoundError')]
+  ];
+  for (const [campo, error] of fallos) {
+    file[campo] = error;
+    await PSA.Proyectos.guardarProyecto();
+    check(PSA.DB.getProyectos()[0].nombre === proyecto.nombre && mismasBytes(),
+      'A3 browser: ' + campo + ' conserva SQLite confirmado');
+    check(document.getElementById('p-nombre').value === 'Cambio pendiente A3' &&
+      PSA.Proyectos.editandoId === proyecto.id, 'A3 browser: ' + campo + ' conserva formulario');
+    check(document.getElementById('toast').textContent.startsWith('No se guardó el proyecto:') &&
+      !PSA.DB.ocupado, 'A3 browser: ' + campo + ' informa fallo sin éxito');
+    file[campo] = null;
+  }
+  check(file.abortos === 3, 'A3 browser: write, close y aborto intentan abortar el stream');
+  file.permiso = 'prompt';
+  await PSA.Proyectos.guardarProyecto();
+  check(PSA.DB.esperaPermiso && document.getElementById('btn-db-connect').textContent === 'Reconectar vertex.db',
+    'A3 browser: permiso revocado ofrece reconexión');
+  await PSA.gestionarConexionDB();
+  check(PSA.DB.esperaPermiso && mismasBytes(), 'A3 browser: autorización denegada conserva datos');
+  file.permiso = 'granted';
+  const confirmar = window.confirm;
+  window.confirm = () => { throw new Error('Reautorizar no debe pedir descartar el formulario'); };
+  try {
+    await PSA.gestionarConexionDB();
+  } finally {
+    window.confirm = confirmar;
+  }
+  check(!PSA.DB.esperaPermiso && PSA.Proyectos.editandoId === proyecto.id &&
+    document.getElementById('p-nombre').value === 'Cambio pendiente A3',
+  'A3 browser: reconexión no recarga SQLite ni descarta formulario');
+  await PSA.Proyectos.guardarProyecto();
+  check(PSA.DB.getProyectos()[0].nombre === 'Cambio pendiente A3' &&
+    PSA.Proyectos.editandoId === null && document.getElementById('toast').textContent.includes('actualizado correctamente'),
+  'A3 browser: reintento confirma edición y limpia formulario solo tras close');
+  check(document.getElementById('tabla-proyectos-body').textContent.includes('Cambio pendiente A3') &&
+    document.getElementById('dash-estado').textContent.includes('Proyectos totales'),
+  'A3 browser: tabla y dashboard reflejan el guardado confirmado');
+  const previo = file.datos.slice();
+  const vacio = { ...file, datos: new Uint8Array(), escrituras: 0 };
+  window.showDirectoryPicker = async () => ({
+    kind: 'directory', name: 'Vacía sintética', async getFileHandle() { return vacio; }
+  });
+  try {
+    await PSA.gestionarConexionDB(true);
+    check(vacio.escrituras === 0 && PSA.DB.getProyectos()[0].nombre === 'Cambio pendiente A3',
+      'A3 browser: archivo existente vacío no sustituye conexión activa');
+  } finally {
+    window.showDirectoryPicker = selector;
+  }
+  check(file.datos.every((valor, indice) => valor === previo[indice]),
+    'A3 browser: cambio fallido no modifica el archivo virtual anterior');
+  return { resultados, archivo: Array.from(file.datos), proyectoId: proyecto.id };
 };
 
 window.probarInterfazTableros = async function () {
@@ -325,7 +418,10 @@ window.verificarCambioBaseTableros = async function () {
     if (!valor) throw new Error(nombre);
     resultados.push(nombre);
   };
-  const elegir = archivo => async () => ({ kind: 'directory', name: 'Otra prueba', async getFileHandle() { return archivo; } });
+  const elegir = archivo => async () => ({ kind: 'directory', name: 'Otra prueba', async getFileHandle(nombre, opciones) {
+    if (!archivo.datos.length && !opciones?.create) throw new DOMException('No existe', 'NotFoundError');
+    return archivo;
+  } });
   try {
     window.showDirectoryPicker = async () => { throw new DOMException('Cancelado', 'AbortError'); };
     await PSA.gestionarConexionDB(true);
