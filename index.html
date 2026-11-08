@@ -90,21 +90,17 @@
        PANEL GENERAL (DASHBOARD)
        ══════════════════════════════════════ -->
   <section id="v-dashboard" class="view active" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0">
-    <div class="card dashboard-welcome">
-      <div>
-        <h2>Panel de control</h2>
-        <p>Resumen actualizado de proyectos, tableros, tareas, vencimientos y actividad local.</p>
+    <div class="dashboard-toolbar" aria-label="Acciones rápidas">
+      <div class="dashboard-toolbar-copy">
+        <span class="dashboard-eyebrow">SEGUIMIENTO OPERATIVO</span>
+        <p>Estado de proyectos, tareas y vencimientos.</p>
       </div>
-      <div class="dashboard-shortcuts" id="dash-accesos" aria-label="Accesos rápidos">
-        <button type="button" class="btn btn-ghost" id="dash-crear-proyecto">Crear proyecto</button>
-        <button type="button" class="btn btn-primary" id="dash-crear-tablero">Crear tablero</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-view="v-proyectos">Proyectos</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-view="v-tableros">Tableros</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-view="v-calendario">Calendario</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-view="v-actividad">Actividad reciente</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-scroll="dash-prioridades">Tareas prioritarias</button>
-        <button type="button" class="btn btn-ghost" data-dashboard-scroll="dash-vencimientos">Tareas atrasadas</button>
+      <div class="dashboard-shortcuts" id="dash-accesos">
+        <button type="button" class="btn btn-ghost" id="dash-crear-proyecto">＋ Crear proyecto</button>
+        <button type="button" class="btn btn-primary" id="dash-crear-tablero">＋ Crear tablero</button>
       </div>
+    </div>
+    <div class="dashboard-create-panel">
       <div class="dashboard-create-card">
         <label>Tablero
           <select id="dash-nueva-tarjeta-tablero"><option value="">Seleccione un tablero</option></select>
@@ -117,7 +113,7 @@
       </div>
       <p id="dash-quick-status" class="work-meta" role="status" aria-live="polite"></p>
     </div>
-    <p id="dash-no-disponible" class="dashboard-status" role="status"></p>
+    <p id="dash-no-disponible" class="dashboard-status card" role="status"></p>
     <p id="dash-error" class="form-error hidden" role="alert"></p>
 
     <div id="dash-data">
@@ -140,7 +136,6 @@
           <div id="dash-vencimiento-conteo" class="dashboard-due-counts"></div>
           <ol id="dash-vencimientos-lista" class="dashboard-task-list dashboard-scroll-list"></ol>
           <p id="dash-vencimientos-mas" class="work-meta"></p>
-          <button type="button" class="btn btn-ghost btn-sm" data-dashboard-view="v-calendario">Abrir calendario</button>
         </section>
 
         <section class="card" aria-labelledby="dash-tableros-titulo">
@@ -152,7 +147,6 @@
           <h2 id="dash-actividad-titulo">Actividad reciente</h2>
           <p id="dash-actividad-error" class="form-error" role="alert"></p>
           <ol id="dash-actividad-reciente" class="dashboard-activity-list dashboard-scroll-list"></ol>
-          <button type="button" class="btn btn-ghost btn-sm" data-dashboard-view="v-actividad">Ver historial completo</button>
         </section>
       </div>
 
