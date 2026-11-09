@@ -235,6 +235,52 @@ window.probarBackupsB1B2 = async function () {
   return { resultados, archivo: Array.from(destino.datos), proyectoId: proyecto.id };
 };
 
+window.probarAcordeonTableros = function () {
+  const resultados = [];
+  const check = (valor, nombre) => {
+    if (!valor) throw new Error(nombre);
+    resultados.push(nombre);
+  };
+  const disparadores = Array.from(document.querySelectorAll('#v-tableros [data-board-accordion-trigger]'));
+  const abiertas = () => disparadores.filter(boton => boton.getAttribute('aria-expanded') === 'true');
+  const ids = ['tableros', 'catalogos', 'movimientos'];
+  const titulos = ['Tableros de proyectos', 'Catálogos de responsables y etiquetas', 'Movimiento de tarjetas seleccionadas'];
+  check(disparadores.length === 3 &&
+    disparadores.map(boton => boton.dataset.boardAccordionTrigger).join(',') === ids.join(',') &&
+    disparadores.map(boton => boton.textContent.trim()).join('|') === titulos.join('|'),
+  'Acordeón: conserva las tres secciones funcionales en orden');
+  check(abiertas().length === 1 && abiertas()[0].dataset.boardAccordionTrigger === 'tableros',
+    'Acordeón: inicia únicamente con Tableros de proyectos expandido');
+  for (const id of [...ids.slice(1), 'tableros', 'movimientos', 'catalogos', 'tableros']) {
+    const boton = disparadores.find(control => control.dataset.boardAccordionTrigger === id);
+    boton.click();
+    const panel = document.getElementById(boton.getAttribute('aria-controls'));
+    check(abiertas().length === 1 && abiertas()[0] === boton,
+      'Acordeón: ' + id + ' queda como única sección expandida');
+    check(!panel.hasAttribute('inert') && panel.getAttribute('aria-hidden') === 'false' &&
+      disparadores.filter(control => control !== boton).every(control => {
+        const otroPanel = document.getElementById(control.getAttribute('aria-controls'));
+        return control.getAttribute('aria-expanded') === 'false' && otroPanel.hasAttribute('inert') &&
+          otroPanel.getAttribute('aria-hidden') === 'true';
+      }), 'Acordeón: sincroniza accesibilidad al abrir ' + id);
+  }
+  const panelTableros = document.querySelector('#board-accordion-tableros');
+  const panelCatalogos = document.querySelector('#board-accordion-catalogos');
+  const panelMovimientos = document.querySelector('#board-accordion-movimientos');
+  check(panelTableros.querySelector('#tableros-catalogo') && panelTableros.querySelector('#tablero-detalle') &&
+    panelTableros.querySelector('#tablero-columnas') && panelCatalogos.querySelector('#catalogo-responsables') &&
+    panelCatalogos.querySelector('#catalogo-etiquetas') && panelMovimientos.querySelector('#tablero-seleccion-movimiento'),
+  'Acordeón: cada contenido permanece en su sección funcional');
+  check(['mover-seleccion-anterior', 'mover-seleccion-siguiente', 'mover-seleccion-destino', 'cancelar-seleccion']
+    .every(accion => panelMovimientos.querySelector(`[data-accion="${accion}"]`)),
+  'Acordeón: conserva los controles de movimiento de tarjetas seleccionadas');
+  check(!disparadores.some(boton => boton.textContent.includes('Control de convocatorias')) &&
+    panelTableros.querySelector('#tablero-titulo'),
+  'Acordeón: los nombres de tablero se renderizan en el detalle y no como secciones');
+  disparadores[0].click();
+  return resultados;
+};
+
 window.probarInterfazTableros = async function () {
   const resultados = [];
   const check = (valor, nombre) => {
@@ -297,9 +343,13 @@ window.probarInterfazTableros = async function () {
 
   click(accion('editar-tablero-actual'));
   check($('#trabajo-form [name="proyecto_id"]').disabled, 'No cambiar proyecto al editar tablero');
-  valor('nombre', 'Operaciones actualizadas');
+  valor('nombre', 'Control de convocatorias');
   await guardar();
-  check(PSA.Trabajo.getTableros()[0].nombre === 'Operaciones actualizadas', 'Editar tablero');
+  check(PSA.Trabajo.getTableros()[0].nombre === 'Control de convocatorias', 'Editar tablero');
+  check($('#tablero-titulo').textContent === 'Control de convocatorias' &&
+    !document.querySelector('[data-board-accordion-trigger="convocatorias"]'),
+  'Control de convocatorias se renderiza como nombre dinámico del tablero');
+  window.probarAcordeonTableros().forEach(resultado => resultados.push(resultado));
 
   click(accion('nueva-lista'));
   valor('nombre', 'Personalizada <b>literal</b>');
@@ -356,7 +406,8 @@ window.probarInterfazTableros = async function () {
   await guardar();
   const tarjeta = PSA.Trabajo.getTarjetas()[0];
   check(tarjeta.lista_id === lista.id && tarjeta.responsable_id === responsable, 'Asociaciones correctas de tarjeta');
-  check(cabeceraEtapa.querySelector('.work-meta').textContent.trim() === '1 tarjeta visible',
+  check(document.querySelector('.kanban-list[data-list-id="' + lista.id + '"] .kanban-list-heading .work-meta')
+    .textContent.trim() === '1 tarjeta visible',
     'Cabecera de etapa: contador singular actualizado al crear tarjeta');
   check(!$('#tablero-columnas script') && !window.__inyeccion, 'Título de tarjeta escapado');
   check(!!$('.work-priority-high') && !!$('.work-overdue'), 'Indicadores de prioridad y vencimiento');
@@ -367,22 +418,19 @@ window.probarInterfazTableros = async function () {
   check(tarjetaCompacta.querySelector('.work-card-primary').textContent.includes('Crítica') &&
     tarjetaCompacta.querySelector('.work-card-primary').textContent.includes('Vencida'),
     'Tarjeta compacta: prioridad y vencimiento permanecen visibles');
-  check(!tarjetaCompacta.querySelector('.work-card-move') &&
-    tarjetaCompacta.querySelector('.work-card-menu-panel [data-accion="historial-tarjeta"]') &&
-    tarjetaCompacta.querySelector('.work-card-menu-panel [data-accion="archivo-tarjeta"]'),
-    'Tarjeta compacta: acciones secundarias agrupadas en menú');
-  check(tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
-    'Tarjeta compacta: selector de destino oculto inicialmente');
+  const accionesMenuTarjeta = Array.from(tarjetaCompacta.querySelectorAll('.work-card-menu-panel > button'));
+  check(accionesMenuTarjeta.length === 3 &&
+    accionesMenuTarjeta.map(boton => boton.dataset.accion).join(',') === 'historial-tarjeta,tarjeta,archivo-tarjeta',
+    'Tarjeta compacta: menú limitado a historial, edición y archivado');
+  check(accionesMenuTarjeta.every(boton => boton.querySelector('svg[aria-hidden="true"]') &&
+    boton.getAttribute('aria-label') === boton.querySelector('[role="tooltip"]').textContent),
+  'Tarjeta compacta: acciones iconográficas con etiquetas y tooltips accesibles');
   tarjetaCompacta.querySelector('.work-card-menu > summary').click();
   check(!!tarjetaCompacta.querySelector('.work-card-menu').open,
     'Tarjeta compacta: menú contextual abre con ratón');
-  tarjetaCompacta.querySelector('[data-accion="mostrar-destino"]').click();
-  check(!tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
-    'Tarjeta compacta: selector específico aparece bajo demanda');
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  check(!tarjetaCompacta.querySelector('.work-card-menu').open &&
-    tarjetaCompacta.querySelector('.work-card-specific-destination').hidden,
-    'Tarjeta compacta: Escape cierra menú y selector');
+  check(!tarjetaCompacta.querySelector('.work-card-menu').open,
+    'Tarjeta compacta: Escape cierra menú');
   tarjetaCompacta.querySelector('.work-card-menu > summary').click();
   document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   check(!tarjetaCompacta.querySelector('.work-card-menu').open,
@@ -421,7 +469,7 @@ window.probarInterfazTableros = async function () {
   cambiar('#tablero-ver-archivados', '');
   $('#tablero-ver-archivados').checked = true;
   $('#tablero-ver-archivados').dispatchEvent(new Event('change'));
-  click(accion('tarjeta', tarjeta.id));
+  click('.work-card h4 ' + accion('tarjeta', tarjeta.id));
   check($('#trabajo-form [name="titulo"]').disabled, 'Detalle archivado en solo lectura');
   cancelar();
   click(accion('archivo-tarjeta', tarjeta.id)); await esperar();
@@ -485,7 +533,7 @@ window.verificarReaperturaTableros = function (anterior) {
   };
   const tablero = PSA.Trabajo.getTableros().find(t => t.id === anterior.tableroId);
   const tarjeta = PSA.Trabajo.getTarjetas().find(t => t.id === anterior.tarjetaId);
-  check(tablero && tablero.nombre === 'Operaciones actualizadas', 'Tablero editado conservado al recargar');
+  check(tablero && tablero.nombre === 'Control de convocatorias', 'Tablero editado conservado al recargar');
   check(tarjeta && tarjeta.titulo === 'Reintento confirmado' && tarjeta.completada === 1, 'Tarjeta editada conservada al recargar');
   check(tarjeta.lista_id === anterior.listaId && tarjeta.proyecto_id === anterior.proyectoId, 'Relaciones conservadas al recargar');
   check(JSON.stringify(PSA.Trabajo.getListas(tablero.id).map(l => l.id)) === JSON.stringify(anterior.orden), 'Orden de listas conservado al recargar');
@@ -606,32 +654,8 @@ window.probarMovimientoTarjetas = async function () {
   }
   PSA.Tableros.abrirProyecto(proyecto.id);
   accion('abrir', tableroId).click();
-
-  const antesBordes = PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion]);
-  accion('tarjeta-anterior', ids[0]).click();
-  await esperar();
-  check($('#tableros-error').textContent.includes('No existe una etapa anterior') &&
-    JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion])) === JSON.stringify(antesBordes),
-  'Mover antes de la primera etapa se informa y no cambia datos');
-  accion('tarjeta-siguiente', ids[4]).click();
-  await esperar();
-  check(PSA.Trabajo.getTarjetas().find(t => t.id === ids[4]).lista_id === siguiente.id,
-    'Mover una tarjeta individual a la etapa siguiente');
-  check(JSON.stringify(PSA.Trabajo.getTarjetas().filter(t => t.lista_id === origen.id).map(t => t.id)) ===
-    JSON.stringify(ids.slice(0, 4)), 'Tarjetas no seleccionadas permanecen en el mismo orden');
-  check(JSON.stringify(PSA.Trabajo.getTarjetas().filter(t => t.lista_id === origen.id).map(t => t.posicion)) ===
-    JSON.stringify([0, 1, 2, 3]), 'Movimiento individual conserva posiciones de origen no seleccionadas');
-  check(JSON.stringify(PSA.Trabajo.getTarjetas().filter(t => t.lista_id === siguiente.id).map(t => t.posicion)) ===
-    JSON.stringify([0, 1, 2]), 'Movimiento individual agrega después de las posiciones existentes');
-
-  const especificaSelect = Array.from(document.querySelectorAll('.tarjeta-destino')).find(control => control.dataset.id === ids[4]);
-  especificaSelect.value = especifica.id;
-  accion('mover-tarjeta', ids[4]).click();
-  await esperar();
-  check(PSA.Trabajo.getTarjetas().find(t => t.id === ids[4]).lista_id === especifica.id,
-    'Elegir etapa específica para una sola tarjeta');
-  check(JSON.stringify(PSA.Trabajo.getTarjetas().filter(t => t.lista_id === siguiente.id).map(t => t.id)) ===
-    JSON.stringify(preexistentes), 'Las tarjetas de destino conservan orden al mover una tarjeta');
+  await PSA.Trabajo.moverTarjeta(ids[4], especifica.id, 0);
+  PSA.Tableros.render();
 
   for (const id of [ids[3], ids[1]]) {
     const control = Array.from(document.querySelectorAll('.tarjeta-seleccion')).find(item => item.dataset.id === id);
@@ -712,12 +736,6 @@ window.probarMovimientoTarjetas = async function () {
     'Reintento mueve únicamente tarjetas seleccionadas');
   check(PSA.Trabajo.getTarjetas().filter(t => t.lista_id === especifica.id).map(t => t.id).join(',') === ids[4],
     'Tarjetas restantes mantienen su etapa y orden tras reintento');
-  const antesUltima = PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion]);
-  accion('tarjeta-siguiente', ids[3]).click();
-  await esperar();
-  check($('#tableros-error').textContent.includes('No existe una etapa siguiente') &&
-    JSON.stringify(PSA.Trabajo.getTarjetas().map(t => [t.id, t.lista_id, t.posicion])) === JSON.stringify(antesUltima),
-  'Mover después de la última etapa se informa y no modifica datos');
   accion('seleccionar-etapa', origen.id).click();
   check($('#tablero-seleccion-cantidad').textContent === '2 tarjetas seleccionadas',
     'Seleccionar etapa completa antes del movimiento siguiente');

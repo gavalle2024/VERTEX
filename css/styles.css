@@ -565,6 +565,60 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
 .tabla-count { font-size: 11.5px; color: var(--muted); margin-bottom: 8px; }
 
 /* ── TABLEROS ── */
+.board-accordion-item {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(18,39,72,.07);
+  overflow: hidden;
+}
+.board-accordion-heading { margin: 0; }
+.board-accordion-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 18px;
+  border: 0;
+  color: var(--navy);
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.board-accordion-trigger::after {
+  content: "";
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform .22s ease;
+}
+.board-accordion-item.is-open .board-accordion-trigger { border-bottom: 2px solid var(--gold); }
+.board-accordion-item.is-open .board-accordion-trigger::after {
+  transform: rotate(225deg) translate(-2px, -1px);
+}
+.board-accordion-trigger:hover { background: rgba(18,39,72,.04); }
+.board-accordion-trigger:focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
+.board-accordion-panel {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows .28s ease, opacity .22s ease;
+}
+.board-accordion-panel[aria-hidden="true"] { grid-template-rows: 0fr; opacity: 0; }
+.board-accordion-panel-inner { min-height: 0; overflow: hidden; }
+.board-accordion-content { padding: 20px; }
+.board-accordion-content > :first-child { margin-top: 0; }
+.board-accordion-content > :last-child { margin-bottom: 0; }
 .board-catalog {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
@@ -659,18 +713,68 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
 .work-card-menu > summary:hover, .work-card-menu > summary:focus-visible { border-color: var(--border); background: #fff; outline-offset: 2px; }
 .work-card-menu-panel {
   position: static;
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  max-height: min(55vh, 360px);
-  overflow: auto;
-  padding: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+  margin-left: auto;
+  overflow: visible;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #fff;
   box-shadow: 0 8px 24px rgb(18 39 72 / 18%);
 }
-.work-card-menu-panel > button { width: 100%; min-height: 32px; padding: 6px 8px; text-align: left; white-space: normal; }
+.work-card-menu-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--navy);
+  background: transparent;
+  cursor: pointer;
+}
+.work-card-menu-action svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.work-card-menu-action:hover { background: var(--bg); border-color: var(--navy); }
+.work-card-menu-action:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.work-card-menu-action:disabled { opacity: .48; cursor: not-allowed; }
+.work-card-menu-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  z-index: 60;
+  width: max-content;
+  max-width: 150px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--navy);
+  box-shadow: 0 4px 12px rgb(18 39 72 / 20%);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+.work-card-menu-action:hover .work-card-menu-tooltip,
+.work-card-menu-action:focus-visible .work-card-menu-tooltip { opacity: 1; transform: translateY(0); }
 .work-card-specific-destination { display: grid; gap: 6px; padding: 7px 4px; border-top: 1px solid var(--border); }
 .work-card-specific-destination[hidden] { display: none; }
 .work-card-specific-destination label { font-size: 11px; font-weight: 700; }
@@ -718,7 +822,6 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
   outline: 3px solid var(--navy2);
   outline-offset: 2px;
 }
-#tablero-seleccion-movimiento h3 { margin: 0 0 8px; color: var(--navy); }
 #tablero-seleccion-movimiento > p { margin: 4px 0; }
 .work-card p { margin: 0; }
 .work-priority-high { border-left-color: var(--danger); }
@@ -910,7 +1013,10 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
 :root[data-theme="dark"] .kanban-list,
 :root[data-theme="dark"] .work-card,
 :root[data-theme="dark"] .calendar-day,
-:root[data-theme="dark"] .connect-box { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: var(--shadow-card); }
+:root[data-theme="dark"] .connect-box,
+:root[data-theme="dark"] .board-accordion-item { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: var(--shadow-card); }
+:root[data-theme="dark"] .board-accordion-trigger { color: var(--text-strong); }
+:root[data-theme="dark"] .board-accordion-trigger:hover { background: var(--surface-muted); }
 :root[data-theme="dark"] input,
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea { background: var(--surface-soft); color: var(--text); border-color: var(--border); color-scheme: dark; }
@@ -943,6 +1049,8 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
 :root[data-theme="dark"] .work-card-menu-panel { background: #202e42; border-color: var(--border); color: var(--text); }
 :root[data-theme="dark"] .work-list-menu-panel button,
 :root[data-theme="dark"] .work-card-menu-panel button { background: #26364c; color: var(--text); border-color: var(--border); }
+:root[data-theme="dark"] .work-card-menu-action:hover { background: var(--surface-muted); border-color: #fff; }
+:root[data-theme="dark"] .work-card-menu-tooltip { background: #edf3fc; color: #172235; }
 :root[data-theme="dark"] .work-list-menu > summary,
 :root[data-theme="dark"] .work-card-menu > summary { color: #fff; }
 :root[data-theme="dark"] .work-list-menu > summary:hover,
@@ -981,6 +1089,11 @@ progress.bar-bg.project-progress-navy::-moz-progress-bar { background: var(--nav
 :root[data-theme="dark"] input:focus-visible,
 :root[data-theme="dark"] select:focus-visible,
 :root[data-theme="dark"] textarea:focus-visible { outline-color: var(--gold); }
+@media (prefers-reduced-motion: reduce) {
+  .board-accordion-panel,
+  .board-accordion-trigger::after,
+  .work-card-menu-tooltip { transition: none; }
+}
 @media (max-width: 600px) {
   .theme-toggle { min-height: 34px; padding: 6px 9px; }
   .theme-toggle-label { font-size: 11px; }

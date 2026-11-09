@@ -12,12 +12,30 @@
   let formularioInicial = '';
   let tarjetasSeleccionadas = new Set();
   let arrastre = null;
+  let seccionAcordeonAbierta = 'tableros';
   const coloresInsertados = new Set();
   let hojaColores = null;
   let avisoColores = false;
   const $ = id => document.getElementById(id);
   const e = valor => PSA.escapeHtml(valor);
   const dialog = () => $('trabajo-dialog');
+
+  function _abrirSeccionAcordeon(seccion) {
+    const vista = $('v-tableros');
+    const disparadores = Array.from(vista.querySelectorAll('[data-board-accordion-trigger]'));
+    if (!disparadores.some(boton => boton.dataset.boardAccordionTrigger === seccion)) return;
+    seccionAcordeonAbierta = seccion;
+    disparadores.forEach(boton => {
+      const abierta = boton.dataset.boardAccordionTrigger === seccionAcordeonAbierta;
+      const panel = $(boton.getAttribute('aria-controls'));
+      boton.setAttribute('aria-expanded', String(abierta));
+      boton.closest('[data-board-accordion-item]')?.classList.toggle('is-open', abierta);
+      if (panel) {
+        panel.toggleAttribute('inert', !abierta);
+        panel.setAttribute('aria-hidden', String(!abierta));
+      }
+    });
+  }
 
   function _claseColor(color) {
     if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) return '';
@@ -47,6 +65,14 @@
   function _boton(texto, accion, id, deshabilitado = false) {
     return `<button type="button" class="btn btn-ghost btn-sm" data-accion="${accion}"
       data-id="${e(id)}"${deshabilitado ? ' disabled' : ''}>${e(texto)}</button>`;
+  }
+
+  function _botonMenuTarjeta(texto, accion, id, icono, deshabilitado = false) {
+    return `<button type="button" class="work-card-menu-action" data-accion="${accion}"
+      data-id="${e(id)}" aria-label="${e(texto)}"${deshabilitado ? ' disabled' : ''}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icono}</svg>
+      <span class="work-card-menu-tooltip" role="tooltip">${e(texto)}</span>
+    </button>`;
   }
 
   function _opciones(filas, valor, nombre = 'nombre') {
@@ -167,13 +193,12 @@
     return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
   }
 
-  function _tarjetaHTML(tarjeta, bloqueada, listas, tarjetasActivas) {
+  function _tarjetaHTML(tarjeta, bloqueada) {
     const hoy = _hoy();
     const fechaProxima = _sumarDias(hoy, 6);
     const vencida = !tarjeta.completada && tarjeta.vencimiento && tarjeta.vencimiento < hoy && !bloqueada;
     const prioridad = ['Alta', 'Urgente'].includes(tarjeta.prioridad) ? ' work-priority-high' : '';
     const seleccionada = tarjetasSeleccionadas.has(tarjeta.id);
-    const posicion = tarjetasActivas.findIndex(fila => fila.id === tarjeta.id);
     const noMovible = bloqueada || tarjeta.archivada || PSA.DB.ocupado;
     const arrastreDeshabilitado = _filtrosTarjetasActivos();
     const prioridadNombre = tarjeta.prioridad === 'Urgente' ? 'Crítica' : tarjeta.prioridad;
@@ -185,10 +210,6 @@
     const responsablesHTML = responsables.map(responsable =>
       `<span class="work-badge${responsable.archivado ? ' work-badge-inactive' : ''}">${e(responsable.nombre)}${responsable.archivado ? ' · Inactivo' : ''}</span>`
     ).join('');
-    const destinoDeshabilitado = bloqueada || tarjeta.archivada || PSA.DB.ocupado;
-    const posicionAnteriorDeshabilitada = noMovible || arrastreDeshabilitado || posicion <= 0;
-    const posicionSiguienteDeshabilitada = noMovible || arrastreDeshabilitado ||
-      posicion < 0 || posicion === tarjetasActivas.length - 1;
     return `<article class="work-card${prioridad}${tarjeta.completada ? ' work-complete' : ''}${seleccionada ? ' work-selected' : ''}"
       data-card-id="${e(tarjeta.id)}" data-archived="${tarjeta.archivada ? 'true' : 'false'}">
       <div class="work-card-top no-print">
@@ -204,26 +225,14 @@
         <details class="work-card-menu">
           <summary aria-label="Acciones de ${e(tarjeta.titulo)}" title="Acciones">⋮</summary>
           <div class="work-card-menu-panel" aria-label="Acciones de tarjeta">
-            ${_boton('Ver historial', 'historial-tarjeta', tarjeta.id, PSA.DB.ocupado)}
-            ${_boton('Editar tarjeta', 'tarjeta', tarjeta.id, PSA.DB.ocupado || bloqueada || tarjeta.archivada)}
-            ${_boton('Subir en la etapa', 'tarjeta-posicion-anterior', tarjeta.id, posicionAnteriorDeshabilitada)}
-            ${_boton('Bajar en la etapa', 'tarjeta-posicion-siguiente', tarjeta.id, posicionSiguienteDeshabilitada)}
-            ${_boton('Mover a etapa anterior', 'tarjeta-anterior', tarjeta.id, destinoDeshabilitado ||
-              listas.findIndex(lista => lista.id === tarjeta.lista_id) <= 0)}
-            ${_boton('Mover a etapa siguiente', 'tarjeta-siguiente', tarjeta.id, destinoDeshabilitado ||
-              listas.findIndex(lista => lista.id === tarjeta.lista_id) < 0 ||
-              listas.findIndex(lista => lista.id === tarjeta.lista_id) === listas.length - 1)}
-            ${_boton('Mover a etapa específica…', 'mostrar-destino', tarjeta.id, destinoDeshabilitado)}
-            <div class="work-card-specific-destination" hidden>
-              <label for="destino-${e(tarjeta.id)}">Etapa de destino</label>
-              <select class="tarjeta-destino" id="destino-${e(tarjeta.id)}" data-id="${e(tarjeta.id)}"
-                aria-label="Destino de ${e(tarjeta.titulo)}"${destinoDeshabilitado ? ' disabled' : ''}>
-                <option value="">Seleccione etapa</option>${_opciones(listas, '', 'nombre')}
-              </select>
-              ${_boton('Confirmar movimiento', 'mover-tarjeta', tarjeta.id, destinoDeshabilitado)}
-            </div>
-            ${_boton(tarjeta.archivada ? 'Restaurar tarjeta' : 'Archivar tarjeta',
-              'archivo-tarjeta', tarjeta.id, bloqueada || PSA.DB.ocupado)}
+            ${_botonMenuTarjeta('Ver historial', 'historial-tarjeta', tarjeta.id,
+              '<path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"/>', PSA.DB.ocupado)}
+            ${_botonMenuTarjeta('Editar tarjeta', 'tarjeta', tarjeta.id,
+              '<path d="m4 20 4.2-1 10.6-10.6a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20ZM14.5 7.1l2.8 2.8"/>',
+              PSA.DB.ocupado || bloqueada || tarjeta.archivada)}
+            ${_botonMenuTarjeta(tarjeta.archivada ? 'Restaurar tarjeta' : 'Archivar tarjeta',
+              'archivo-tarjeta', tarjeta.id,
+              '<path d="M4 8h16v12H4V8Zm-1-4h18v4H3V4Zm6 8h6"/>', bloqueada || PSA.DB.ocupado)}
           </div>
         </details>
       </div>
@@ -340,7 +349,7 @@
             </div>
           </details>
         </header>
-        <div class="work-cards">${contenido.map(t => _tarjetaHTML(t, inactiva, activas, tarjetasActivas)).join('') ||
+        <div class="work-cards">${contenido.map(t => _tarjetaHTML(t, inactiva)).join('') ||
           `<p class="empty kanban-list-empty">${filtrosActivos ? 'Sin coincidencias' : 'Sin tarjetas'}</p>`}</div>
         <div class="kanban-list-footer no-print">${_boton('+ Crear tarjeta', 'nueva-tarjeta', lista.id, inactiva || PSA.DB.ocupado)}</div>
       </section>`;
@@ -952,7 +961,10 @@
     try {
       if (accion === 'abrir') {
         if (tableroId !== id) tarjetasSeleccionadas.clear();
-        tableroId = id; _renderDetalle(); $('tablero-titulo').focus();
+        tableroId = id;
+        _renderDetalle();
+        _abrirSeccionAcordeon('tableros');
+        $('tablero-titulo').focus();
       } else if (accion === 'nuevo-tablero') editar('tablero');
       else if (accion === 'tablero') editar('tablero', id);
       else if (accion === 'editar-tablero-actual') editar('tablero', tableroId);
@@ -1028,6 +1040,11 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     $('v-tableros').addEventListener('click', _accion);
+    _abrirSeccionAcordeon(seccionAcordeonAbierta);
+    $('v-tableros').addEventListener('click', event => {
+      const disparador = event.target.closest('[data-board-accordion-trigger]');
+      if (disparador) _abrirSeccionAcordeon(disparador.dataset.boardAccordionTrigger);
+    });
     document.addEventListener('click', event => {
       document.querySelectorAll('.work-card-menu[open], .work-list-menu[open]').forEach(menu => {
         if (!menu.contains(event.target)) {

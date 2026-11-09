@@ -351,110 +351,135 @@
   </section>
 
   <section id="v-tableros" class="view" role="tabpanel" aria-labelledby="tab-tableros" tabindex="0">
-    <div class="card">
-      <h2>Tableros de proyectos</h2>
-      <div class="filters no-print">
-        <label>Proyecto
-          <select id="tableros-proyecto" aria-label="Filtrar tableros por proyecto"></select>
-        </label>
-        <label class="check-label">
-          <input id="tableros-archivados" type="checkbox"> Incluir archivados
-        </label>
-        <button class="btn btn-primary" data-accion="nuevo-tablero">Crear tablero</button>
-      </div>
-      <p id="tableros-error" class="form-error" role="alert"></p>
-      <div id="tableros-catalogo" class="board-catalog"></div>
-    </div>
-    <div class="card">
-      <h2>Catálogos de responsables y etiquetas</h2>
-      <p class="work-meta">Los registros inactivos conservan sus asignaciones históricas y pueden reactivarse.</p>
-      <div class="catalog-admin">
-        <section aria-labelledby="responsables-titulo">
-          <div class="actions">
-            <h3 id="responsables-titulo">Responsables</h3>
-            <button type="button" class="btn btn-primary btn-sm" data-accion="nuevo-responsable">Crear responsable</button>
+    <section class="board-accordion-item is-open" data-board-accordion-item="tableros">
+      <h2 class="board-accordion-heading">
+        <button type="button" class="board-accordion-trigger" data-board-accordion-trigger="tableros"
+          aria-expanded="true" aria-controls="board-accordion-tableros">Tableros de proyectos</button>
+      </h2>
+      <div id="board-accordion-tableros" class="board-accordion-panel">
+        <div class="board-accordion-panel-inner">
+          <div class="board-accordion-content">
+            <div class="filters no-print">
+              <label>Proyecto
+                <select id="tableros-proyecto" aria-label="Filtrar tableros por proyecto"></select>
+              </label>
+              <label class="check-label">
+                <input id="tableros-archivados" type="checkbox"> Incluir archivados
+              </label>
+              <button class="btn btn-primary" data-accion="nuevo-tablero">Crear tablero</button>
+            </div>
+            <p id="tableros-error" class="form-error" role="alert"></p>
+            <div id="tableros-catalogo" class="board-catalog"></div>
+            <div id="tablero-detalle" class="hidden">
+              <p id="tablero-proyecto"></p>
+              <h2 id="tablero-titulo" tabindex="-1"></h2>
+              <p id="tablero-descripcion" class="preserve-text"></p>
+              <p id="tablero-fechas" class="work-meta"></p>
+              <div class="filters no-print" aria-label="Búsqueda y filtros de tarjetas">
+                <label>Buscar por título o descripción
+                  <input type="search" id="filtro-tarjetas-texto" placeholder="Buscar tarjetas…" autocomplete="off">
+                </label>
+                <label>Responsable<select id="filtro-tarjetas-responsable"><option value="">Todos</option></select></label>
+                <label>Etiqueta<select id="filtro-tarjetas-etiqueta"><option value="">Todas</option></select></label>
+                <label>Prioridad<select id="filtro-tarjetas-prioridad">
+                  <option value="">Todas</option><option value="Urgente">Crítica</option>
+                  <option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option>
+                </select></label>
+                <label>Etapa<select id="filtro-tarjetas-lista"><option value="">Todas</option></select></label>
+                <label>Asignación de responsables<select id="filtro-tarjetas-asignacion">
+                  <option value="">Todas</option><option value="con">Con responsables</option>
+                  <option value="sin">Sin responsables</option>
+                </select></label>
+                <label>Vencimiento<select id="filtro-tarjetas-plazo">
+                  <option value="">Cualquier fecha</option><option value="con">Con vencimiento</option>
+                  <option value="sin">Sin vencimiento</option><option value="vencidas">Vencidas</option>
+                  <option value="hoy">Vencen hoy</option><option value="proximos7">Próximos 7 días</option>
+                  <option value="intervalo">Intervalo</option>
+                </select></label>
+                <label>Desde<input id="filtro-fechas-desde" type="date" disabled></label>
+                <label>Hasta<input id="filtro-fechas-hasta" type="date" disabled></label>
+                <button type="button" class="btn btn-ghost" data-accion="limpiar-filtros-tarjetas">Limpiar filtros</button>
+              </div>
+              <p id="tablero-resultados" class="work-meta" role="status" aria-live="polite"></p>
+              <p id="tablero-filtros-estado" class="work-meta"></p>
+              <div class="actions no-print">
+                <button class="btn btn-ghost" data-accion="editar-tablero-actual">Editar tablero</button>
+                <button class="btn btn-primary" data-accion="nueva-lista">Crear lista</button>
+                <label class="check-label"><input id="tablero-ver-archivados" type="checkbox"> Incluir listas y tarjetas archivadas</label>
+              </div>
+              <p id="tablero-aviso" role="status"></p>
+              <p id="tablero-arrastre-estado" class="work-meta" role="status" aria-live="polite">
+                Para mover una tarjeta, arrastre desde su control «Arrastrar». Use «Subir/Bajar en la etapa» como alternativa accesible.
+                El arrastre siempre afecta a una sola tarjeta; use la barra para mover varias.
+              </p>
+              <div id="tablero-columnas" class="kanban" aria-label="Listas y tarjetas del tablero"></div>
+            </div>
           </div>
-          <label>Buscar responsable
-            <input type="search" id="buscar-responsables" placeholder="Nombre" autocomplete="off">
-          </label>
-          <label class="check-label"><input id="ver-responsables-inactivos" type="checkbox"> Incluir inactivos</label>
-          <div id="catalogo-responsables" class="catalog-items"></div>
-        </section>
-        <section aria-labelledby="etiquetas-titulo">
-          <div class="actions">
-            <h3 id="etiquetas-titulo">Etiquetas</h3>
-            <button type="button" class="btn btn-primary btn-sm" data-accion="nueva-etiqueta">Crear etiqueta</button>
+        </div>
+      </div>
+    </section>
+    <section class="board-accordion-item" data-board-accordion-item="catalogos">
+      <h2 class="board-accordion-heading">
+        <button type="button" class="board-accordion-trigger" data-board-accordion-trigger="catalogos"
+          aria-expanded="false" aria-controls="board-accordion-catalogos">Catálogos de responsables y etiquetas</button>
+      </h2>
+      <div id="board-accordion-catalogos" class="board-accordion-panel" aria-hidden="true" inert>
+        <div class="board-accordion-panel-inner">
+          <div class="board-accordion-content">
+            <p class="work-meta">Los registros inactivos conservan sus asignaciones históricas y pueden reactivarse.</p>
+            <div class="catalog-admin">
+              <section aria-labelledby="responsables-titulo">
+                <div class="actions">
+                  <h3 id="responsables-titulo">Responsables</h3>
+                  <button type="button" class="btn btn-primary btn-sm" data-accion="nuevo-responsable">Crear responsable</button>
+                </div>
+                <label>Buscar responsable
+                  <input type="search" id="buscar-responsables" placeholder="Nombre" autocomplete="off">
+                </label>
+                <label class="check-label"><input id="ver-responsables-inactivos" type="checkbox"> Incluir inactivos</label>
+                <div id="catalogo-responsables" class="catalog-items"></div>
+              </section>
+              <section aria-labelledby="etiquetas-titulo">
+                <div class="actions">
+                  <h3 id="etiquetas-titulo">Etiquetas</h3>
+                  <button type="button" class="btn btn-primary btn-sm" data-accion="nueva-etiqueta">Crear etiqueta</button>
+                </div>
+                <label>Buscar etiqueta
+                  <input type="search" id="buscar-etiquetas" placeholder="Nombre" autocomplete="off">
+                </label>
+                <label class="check-label"><input id="ver-etiquetas-inactivas" type="checkbox"> Incluir inactivas</label>
+                <div id="catalogo-etiquetas" class="catalog-items"></div>
+              </section>
+            </div>
           </div>
-          <label>Buscar etiqueta
-            <input type="search" id="buscar-etiquetas" placeholder="Nombre" autocomplete="off">
-          </label>
-          <label class="check-label"><input id="ver-etiquetas-inactivas" type="checkbox"> Incluir inactivas</label>
-          <div id="catalogo-etiquetas" class="catalog-items"></div>
-        </section>
-      </div>
-    </div>
-    <div id="tablero-detalle" class="hidden">
-      <div class="card">
-        <p id="tablero-proyecto"></p>
-        <h2 id="tablero-titulo" tabindex="-1"></h2>
-        <p id="tablero-descripcion" class="preserve-text"></p>
-        <p id="tablero-fechas" class="work-meta"></p>
-        <div class="filters no-print" aria-label="Búsqueda y filtros de tarjetas">
-          <label>Buscar por título o descripción
-            <input type="search" id="filtro-tarjetas-texto" placeholder="Buscar tarjetas…" autocomplete="off">
-          </label>
-          <label>Responsable<select id="filtro-tarjetas-responsable"><option value="">Todos</option></select></label>
-          <label>Etiqueta<select id="filtro-tarjetas-etiqueta"><option value="">Todas</option></select></label>
-          <label>Prioridad<select id="filtro-tarjetas-prioridad">
-            <option value="">Todas</option><option value="Urgente">Crítica</option>
-            <option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option>
-          </select></label>
-          <label>Etapa<select id="filtro-tarjetas-lista"><option value="">Todas</option></select></label>
-          <label>Asignación de responsables<select id="filtro-tarjetas-asignacion">
-            <option value="">Todas</option><option value="con">Con responsables</option>
-            <option value="sin">Sin responsables</option>
-          </select></label>
-          <label>Vencimiento<select id="filtro-tarjetas-plazo">
-            <option value="">Cualquier fecha</option><option value="con">Con vencimiento</option>
-            <option value="sin">Sin vencimiento</option><option value="vencidas">Vencidas</option>
-            <option value="hoy">Vencen hoy</option><option value="proximos7">Próximos 7 días</option>
-            <option value="intervalo">Intervalo</option>
-          </select></label>
-          <label>Desde<input id="filtro-fechas-desde" type="date" disabled></label>
-          <label>Hasta<input id="filtro-fechas-hasta" type="date" disabled></label>
-          <button type="button" class="btn btn-ghost" data-accion="limpiar-filtros-tarjetas">Limpiar filtros</button>
-        </div>
-        <p id="tablero-resultados" class="work-meta" role="status" aria-live="polite"></p>
-        <p id="tablero-filtros-estado" class="work-meta"></p>
-        <div class="actions no-print">
-          <button class="btn btn-ghost" data-accion="editar-tablero-actual">Editar tablero</button>
-          <button class="btn btn-primary" data-accion="nueva-lista">Crear lista</button>
-          <label class="check-label"><input id="tablero-ver-archivados" type="checkbox"> Incluir listas y tarjetas archivadas</label>
-        </div>
-        <p id="tablero-aviso" role="status"></p>
-        <p id="tablero-arrastre-estado" class="work-meta" role="status" aria-live="polite">
-          Para mover una tarjeta, arrastre desde su control «Arrastrar». Use «Subir/Bajar en la etapa» como alternativa accesible.
-          El arrastre siempre afecta a una sola tarjeta; use la barra para mover varias.
-        </p>
-      </div>
-      <div id="tablero-seleccion-movimiento" class="card no-print" aria-label="Mover tarjetas seleccionadas">
-        <h3>Movimiento de tarjetas seleccionadas</h3>
-        <p id="tablero-seleccion-cantidad" aria-live="polite" tabindex="-1">0 tarjetas seleccionadas</p>
-        <p id="tablero-seleccion-ayuda" class="work-meta"></p>
-        <label class="check-label"><input id="tablero-incluir-seleccion-oculta" type="checkbox">
-          Incluir también las tarjetas seleccionadas que los filtros ocultan</label>
-        <div class="actions">
-          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-anterior">Mover cada una a la etapa anterior</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-siguiente">Mover cada una a la etapa siguiente</button>
-          <label class="work-destination">Destino específico
-            <select id="tablero-seleccion-destino" aria-label="Destino de las tarjetas seleccionadas"></select>
-          </label>
-          <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-destino">Mover seleccionadas al destino</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-accion="cancelar-seleccion">Cancelar selección</button>
         </div>
       </div>
-      <div id="tablero-columnas" class="kanban" aria-label="Listas y tarjetas del tablero"></div>
-    </div>
+    </section>
+    <section class="board-accordion-item" data-board-accordion-item="movimientos">
+      <h2 class="board-accordion-heading">
+        <button type="button" class="board-accordion-trigger" data-board-accordion-trigger="movimientos"
+          aria-expanded="false" aria-controls="board-accordion-movimientos">Movimiento de tarjetas seleccionadas</button>
+      </h2>
+      <div id="board-accordion-movimientos" class="board-accordion-panel" aria-hidden="true" inert>
+        <div class="board-accordion-panel-inner">
+          <div id="tablero-seleccion-movimiento" class="board-accordion-content no-print" aria-label="Mover tarjetas seleccionadas">
+            <p id="tablero-seleccion-cantidad" aria-live="polite" tabindex="-1">0 tarjetas seleccionadas</p>
+            <p id="tablero-seleccion-ayuda" class="work-meta"></p>
+            <label class="check-label"><input id="tablero-incluir-seleccion-oculta" type="checkbox">
+              Incluir también las tarjetas seleccionadas que los filtros ocultan</label>
+            <div class="actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-anterior">Mover cada una a la etapa anterior</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-siguiente">Mover cada una a la etapa siguiente</button>
+              <label class="work-destination">Destino específico
+                <select id="tablero-seleccion-destino" aria-label="Destino de las tarjetas seleccionadas"></select>
+              </label>
+              <button type="button" class="btn btn-ghost btn-sm" data-accion="mover-seleccion-destino">Mover seleccionadas al destino</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-accion="cancelar-seleccion">Cancelar selección</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </section>
 
   <section id="v-calendario" class="view" role="tabpanel" aria-labelledby="tab-calendario" tabindex="0">
